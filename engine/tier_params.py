@@ -41,13 +41,12 @@ def generate_tier_map(safety_factor: int = 20) -> Dict[int, TierConfig]:
         stop = -(base * 10) 
         profit = base * 6 
         
-        # Cap: ~3.5x Stop Loss
+        # Cap: ~3.5x Stop Loss (This is a negative number, e.g., -1750)
         cat_cap = stop * 3.5
         
         # Calculate End GA (Start of next tier - 1)
         if i < len(specs) - 1:
             next_base = specs[i+1][1]
-            # Ensure next tier start doesn't overlap weirdly if safety factor is low
             next_start = next_base * safety_factor
             end_ga = next_start - 1
         else:
@@ -66,18 +65,17 @@ def generate_tier_map(safety_factor: int = 20) -> Dict[int, TierConfig]:
         
     return tier_map
 
-# --- CRITICAL FIX: EXPORT DEFAULT MAP ---
-# This prevents ImportError in other files that expect TIER_MAP to exist.
+# Default Map for imports
 TIER_MAP = generate_tier_map(safety_factor=20)
 
 def get_tier_for_ga(ga: float, tier_map: Optional[Dict[int, TierConfig]] = None) -> TierConfig:
     """
-    Finds the correct tier.
-    If tier_map is None, uses the default TIER_MAP (Standard Doctrine).
+    Finds the correct tier for a given Game Account balance.
     """
     if tier_map is None:
         tier_map = TIER_MAP
 
+    # Check Tiers
     for tier_level, config in tier_map.items():
         if config.min_ga <= ga <= config.max_ga:
             return config
@@ -86,9 +84,12 @@ def get_tier_for_ga(ga: float, tier_map: Optional[Dict[int, TierConfig]] = None)
     lowest_min = tier_map[1].min_ga
     if ga < lowest_min:
         return tier_map[1]
+    
+    # If above max, return highest tier
     return tier_map[5]
 
 def get_churn_bet_size(tier_level: int) -> int:
+    """Returns the bet size for Gold Churn mode."""
     if tier_level <= 2:
         return 50
     return 100
