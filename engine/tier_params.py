@@ -1,3 +1,12 @@
+This error (`'NoneType' object has no attribute 'catastrophic_cap'`) confirms that the function `get_tier_for_ga` is failing to find a tier for your bankroll and is returning `None` (nothing) instead of a valid Tier object. This usually happens when the bankroll gets very high (above the max defined range) and the "fallback" logic at the end of the file is missing or cut off.
+
+We need to make `engine/tier_params.py` robust so it **always** returns a tier, no matter how high or low the bankroll gets.
+
+**Please replace the entire content of `engine/tier_params.py` with this definitive version.**
+
+### `engine/tier_params.py`
+
+```python
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -50,7 +59,8 @@ def generate_tier_map(safety_factor: int = 20) -> Dict[int, TierConfig]:
             next_start = next_base * safety_factor
             end_ga = next_start - 1
         else:
-            end_ga = 9999999
+            # Huge number to catch everything above Tier 5
+            end_ga = 999_999_999_999
             
         tier_map[level] = TierConfig(
             level=level,
@@ -71,18 +81,31 @@ TIER_MAP = generate_tier_map(safety_factor=20)
 def get_tier_for_ga(ga: float, tier_map: Optional[Dict[int, TierConfig]] = None) -> TierConfig:
     """
     Finds the correct tier for a given Game Account balance.
+    SAFEGUARDED: Will never return None.
     """
     if tier_map is None:
         tier_map = TIER_MAP
 
-    # Check Tiers
+    # 1. Normal Lookup
     for tier_level, config in tier_map.items():
         if config.min_ga <= ga <= config.max_ga:
             return config
             
-    # Fallback logic
+    # 2. Low Bankroll Fallback (Below Tier 1)
+    # If we are below the minimum, return Tier 1
     lowest_min = tier_map[1].min_ga
     if ga < lowest_min:
         return tier_map[1]
     
-    # If above max, return highest tier
+    # 3. High Bankroll Fallback (Above Tier 5)
+    # If we exceeded the max (unlikely with the huge number above, but safe), return highest tier
+    return tier_map[5]
+
+def get_churn_bet_size(tier_level: int) -> int:
+    """Returns the bet size for Gold Churn mode."""
+    if tier_level <= 2:
+        return 50
+    return 100
+```
+
+**Once you have saved this file, reload the simulator page (Refresh your browser) and click RUN STATUS SIM again.** It should now work perfectly.
