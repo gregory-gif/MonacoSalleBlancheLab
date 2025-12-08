@@ -20,22 +20,53 @@ SBM_TIERS = {
 class SimulationWorker:
     """Runs the strategy logic."""
     @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool = False):
+    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool = False, penalty_mode: bool = False):
         tier = get_tier_for_ga(current_ga, tier_map)
         
-        session_overrides = overrides
-        trigger_profit_amount = 0
-        ratchet_triggered = False
-        
-        if use_ratchet:
-            trigger_profit_amount = overrides.profit_lock_units * tier.base_unit
+        # --- PENALTY BOX LOGIC (Catastrophic Cap Hit) ---
+        if penalty_mode:
+            # Override Tier Defaults for Penalty Mode
+            # Prestige Hold (GA >= 2k) -> Flat 100
+            # Safety Exile (GA < 2k) -> Flat 50
+            flat_bet = 100 if current_ga >= 2000 else 50
+            
+            # Create a temporary 'Penalty Tier'
+            tier = TierConfig(
+                level=tier.level,
+                min_ga=0, max_ga=9999999,
+                base_unit=flat_bet,
+                press_unit=flat_bet, # No press
+                stop_loss=tier.stop_loss, # Keep original stop loss risk? Or reduce? 
+                # usually in penalty we just want to survive. Let's keep tier stops but flat bets.
+                profit_lock=tier.profit_lock,
+                catastrophic_cap=tier.catastrophic_cap
+            )
+            
+            # Force overrides to disable pressing
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit,
                 stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=1000, 
+                profit_lock_units=overrides.profit_lock_units,
+                press_trigger_wins=999, # Impossible to trigger press
+                press_depth=0 # Flat only
+            )
+        else:
+            session_overrides = overrides
+
+        # --- RATCHET SETUP ---
+        trigger_profit_amount = 0
+        ratchet_triggered = False
+        
+        if use_ratchet and not penalty_mode:
+            trigger_profit_amount = overrides.profit_lock_units * tier.base_unit
+            # Update overrides with Ratchet params
+            # We create a new object to avoid mutating the shared one
+            session_overrides = StrategyOverrides(
+                iron_gate_limit=overrides.iron_gate_limit,
+                stop_loss_units=overrides.stop_loss_units,
+                profit_lock_units=1000, # Remove standard lock, use Ratchet
                 press_trigger_wins=overrides.press_trigger_wins,
                 press_depth=overrides.press_depth,
-                # Pass through the new variables
                 ratchet_enabled=True,
                 ratchet_lock_pct=overrides.ratchet_lock_pct
             )
@@ -54,8 +85,7 @@ class SimulationWorker:
             volume += bet
             
             # --- RATCHET CHECK ---
-            # (Logic is now partly inside BaccaratStrategist, but we keep the loop break here)
-            if use_ratchet:
+            if use_ratchet and not penalty_mode:
                 if not ratchet_triggered and state.session_pnl >= trigger_profit_amount:
                     ratchet_triggered = True
                 
@@ -116,9 +146,14 @@ class SimulationWorker:
         gold_hit_year = -1
         current_year_points = 0
         
+        # Track YTD PnL for Catastrophic Cap
+        current_year_pnl = 0.0
+        
         for m in range(total_months):
+            # Reset Yearly Counters
             if m > 0 and m % 12 == 0:
                 current_year_points = 0
+                current_year_pnl = 0.0
 
             # A. Luxury Tax
             tax_thresh = overrides.tax_threshold
@@ -142,7 +177,7 @@ class SimulationWorker:
             else:
                 m_holidays += 1
             
-            # C. Play
+            # C. Play Logic
             can_play = (current_ga >= 1500)
             if not can_play:
                 m_insolvent_months += 1
@@ -152,16 +187,33 @@ class SimulationWorker:
             
             if can_play and sessions_due > 0:
                 for _ in range(sessions_due):
-                    pnl, vol = SimulationWorker.run_session(current_ga, overrides, tier_map, use_ratchet)
+                    
+                    # 1. Determine Tier & Cap
+                    current_tier = get_tier_for_ga(current_ga, tier_map)
+                    
+                    # 2. Check Catastrophic Cap (Penalty Box)
+                    # Cap is negative (e.g., -1400). If PnL < -1400, we are in Penalty.
+                    is_penalty = False
+                    if current_year_pnl <= current_tier.catastrophic_cap:
+                        is_penalty = True
+                        
+                    # 3. Run Session
+                    pnl, vol = SimulationWorker.run_session(
+                        current_ga, overrides, tier_map, use_ratchet, penalty_mode=is_penalty
+                    )
+                    
                     current_ga += pnl
                     m_play_pnl += pnl
+                    current_year_pnl += pnl
                     sessions_played_total += 1
                     m_total_volume += vol
                     last_session_won = (pnl > 0)
                     
+                    # Points
                     points = vol * (earn_rate / 100)
                     current_year_points += points
             
+            # Check Gold Status
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
             
@@ -180,5 +232,6 @@ class SimulationWorker:
         }
 
 def show_simulator():
-    # ... (Your existing UI code structure remains mostly the same)
-    # Note
+    # (Insert the UI layout code from your original paste here)
+    # The crucial fix was in the SimulationWorker class above.
+    pass
