@@ -1,4 +1,4 @@
-from nicegui import ui, app # Import 'app' so Gunicorn can find it
+from nicegui import ui, app
 from ui.layout import create_layout
 from ui.dashboard import show_dashboard
 from ui.scorecard import show_scorecard
@@ -38,7 +38,8 @@ with content_container:
     show_dashboard()
 
 # 5. Launch the App
-# CRITICAL: This configures the app but does not block execution when managed by Gunicorn
+# CRITICAL: This must be at the far left (no indentation)
+# CRITICAL: Do NOT put this inside an if __name__ == "__main__" block
 ui.run(
     title='Salle Blanche Lab',
     viewport='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
