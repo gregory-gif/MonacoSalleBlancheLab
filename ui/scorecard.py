@@ -189,3 +189,8 @@ class Scorecard:
                 with ui.row().classes('p-4 w-full justify-between'):
                     self.next_shoe_btn = ui.button('Next Shoe', on_click=self.advance_shoe, color='blue', icon='skip_next').props('outline')
                     self.end_session_btn = ui.button('End & Save', on_click=self.end_session, color='red', icon='save').props('outline')
+
+def show_scorecard():
+    # Helper to clear content and show this view
+    # This was missing in your error log!
+    Scorecard()
