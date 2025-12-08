@@ -46,7 +46,8 @@ class SimulationWorker:
                 shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy,
                 press_trigger_wins=999, 
-                press_depth=0 
+                press_depth=0,
+                ratchet_enabled=False # Force off in penalty
             )
         else:
             session_overrides = overrides
@@ -55,12 +56,15 @@ class SimulationWorker:
         trigger_profit_amount = 0
         ratchet_triggered = False
         
+        # Logic: If Ratchet is ON, we disable the standard Profit Lock stop
         if use_ratchet and not is_active_penalty:
             trigger_profit_amount = overrides.profit_lock_units * tier.base_unit
+            
+            # We recreate the overrides to "Infinite" target so Strategist doesn't stop us
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit,
                 stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=1000, 
+                profit_lock_units=1000, # effectively infinite
                 press_trigger_wins=overrides.press_trigger_wins,
                 press_depth=overrides.press_depth,
                 ratchet_enabled=True,
@@ -151,7 +155,7 @@ class SimulationWorker:
         current_year_points = 0
         current_year_pnl = 0.0
         
-        # New Metric: Did we survive Year 1?
+        # Track Year 1 Survival
         failed_year_one = False
         
         for m in range(total_months):
@@ -182,7 +186,7 @@ class SimulationWorker:
             can_play = (current_ga >= insolvency_floor)
             if not can_play:
                 m_insolvent_months += 1
-                if m < 12: # If we are insolvent in the first 12 months
+                if m < 12:
                     failed_year_one = True
             
             expected_sessions = int((m + 1) * (sessions_per_year / 12))
@@ -400,7 +404,8 @@ def show_simulator():
                 tax_rate=config['tax_rate'],
                 bet_strategy=bet_strat_enum,
                 shoes_per_session=int(slider_shoes.value),
-                penalty_box_enabled=switch_penalty.value
+                penalty_box_enabled=switch_penalty.value,
+                ratchet_enabled=switch_ratchet.value # <--- CRITICAL FIX: Passing the switch value
             )
 
             start_ga = config['start_ga']
@@ -663,7 +668,7 @@ def show_simulator():
                         lbl_frequency = ui.label()
                     slider_frequency = ui.slider(min=9, max=50, value=10).props('color=blue')
                     lbl_frequency.bind_text_from(slider_frequency, 'value', lambda v: f'{v}')
-                    lbl_frequency.set_text('10') 
+                    lbl_frequency.set_text('9') 
 
                 with ui.column().classes('w-1/2'):
                     ui.label('LADDER PREVIEW').classes('font-bold text-white mb-2')
