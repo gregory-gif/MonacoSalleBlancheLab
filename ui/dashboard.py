@@ -7,13 +7,15 @@ def show_dashboard():
     # 1. Load Data
     profile = load_profile()
     history = profile.get('history', [])
-    current_ga = profile['ga']
-    ytd_pnl = profile['ytd_pnl']
+    current_ga = profile.get('ga', 1700.0) # Added safety default
+    ytd_pnl = profile.get('ytd_pnl', 0.0)
     
     # 2. Key Metrics
     contributions = profile.get('contributions', 0)
-    # Calculate Luxury Tax exposure
-    potential_tax = calculate_luxury_tax(current_ga, profile.get('luxury_tax_paid', 0))
+    
+    # --- CORRECTION: Function only accepts 'ga' ---
+    # We calculate the total tax liability on the current balance.
+    potential_tax = calculate_luxury_tax(current_ga)
     
     # 3. Build UI
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
@@ -82,7 +84,10 @@ def show_dashboard():
             ui.label('RECENT LOGS').classes('p-4 text-slate-500 text-xs font-bold')
             
             with ui.column().classes('w-full gap-0'):
-                for session in reversed(history[-5:]): # Show last 5
+                # Handle cases where history is empty or short
+                recent_history = reversed(history[-5:]) if history else []
+                
+                for session in recent_history: 
                     pnl = session['pnl']
                     color = 'text-green-400' if pnl >= 0 else 'text-red-400'
                     icon = 'trending_up' if pnl >= 0 else 'trending_down'
@@ -92,6 +97,4 @@ def show_dashboard():
                             ui.icon(icon).classes(color)
                             with ui.column().classes('gap-0'):
                                 ui.label(session['date']).classes('text-white text-sm font-bold')
-                                ui.label(f"Start: €{session['start_ga']}").classes('text-xs text-slate-500')
-                        
-                        ui.label(f"€{pnl:+}").classes(f'text-lg font-bold {color}')
+                                ui.label(f"Start: €
