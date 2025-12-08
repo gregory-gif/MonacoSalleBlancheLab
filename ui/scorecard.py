@@ -8,7 +8,8 @@ class Scorecard:
         # 1. LOAD PERSISTENCE
         # -------------------
         self.profile = load_profile()
-        self.start_ga = self.profile['ga']
+        # Default to 1700 if new profile
+        self.start_ga = self.profile.get('ga', 1700.0) 
         
         # 2. AUTO-CALCULATE TIER (Unified Ladder)
         # ---------------------------------------
@@ -17,14 +18,14 @@ class Scorecard:
         
         # Initialize Session
         self.state = SessionState(tier=self.tier_config)
-        self.current_decision = BaccaratStrategist.get_next_decision(self.state, ytd_pnl=self.profile['ytd_pnl'])
+        self.current_decision = BaccaratStrategist.get_next_decision(self.state)
         
         # UI Refs
         self.hud_bet_label = None
         self.hud_reason_label = None
         self.hud_mode_badge = None
         self.pnl_label = None
-        self.ga_label = None  # New: Shows Total Bankroll
+        self.ga_label = None  # Shows Total Bankroll
         self.shoe_progress = None
         self.shoe_label = None
         self.next_shoe_btn = None
@@ -45,7 +46,7 @@ class Scorecard:
         BaccaratStrategist.update_state_after_hand(self.state, won, pnl_change)
         
         # Get Next Prediction
-        self.current_decision = BaccaratStrategist.get_next_decision(self.state, ytd_pnl=self.profile['ytd_pnl'])
+        self.current_decision = BaccaratStrategist.get_next_decision(self.state)
         
         # Refresh Screen
         self.refresh_hud()
@@ -61,7 +62,7 @@ class Scorecard:
         
         # Reset Shoe-Specific Counters (but keep PnL)
         self.state.hands_played_in_shoe = 0
-        self.state.presses_this_shoe = 0
+        self.state.current_press_streak = 0
         self.state.consecutive_wins = 0
         self.state.consecutive_losses = 0
         self.state.penalty_cooldown = 0
@@ -72,7 +73,7 @@ class Scorecard:
             ui.notify('Entering Shoe 3: Survival Rules Active', type='info')
 
         # Get fresh decision for new shoe
-        self.current_decision = BaccaratStrategist.get_next_decision(self.state, ytd_pnl=self.profile['ytd_pnl'])
+        self.current_decision = BaccaratStrategist.get_next_decision(self.state)
         self.refresh_hud()
         ui.notify(f'Started Shoe {self.state.current_shoe}', type='positive')
 
@@ -188,7 +189,3 @@ class Scorecard:
                 with ui.row().classes('p-4 w-full justify-between'):
                     self.next_shoe_btn = ui.button('Next Shoe', on_click=self.advance_shoe, color='blue', icon='skip_next').props('outline')
                     self.end_session_btn = ui.button('End & Save', on_click=self.end_session, color='red', icon='save').props('outline')
-
-def show_scorecard():
-    # Helper to clear content and show this view
-    Scorecard()
