@@ -7,14 +7,13 @@ def show_dashboard():
     # 1. Load Data
     profile = load_profile()
     history = profile.get('history', [])
-    current_ga = profile.get('ga', 1700.0) # Added safety default
+    current_ga = profile.get('ga', 1700.0) 
     ytd_pnl = profile.get('ytd_pnl', 0.0)
     
     # 2. Key Metrics
     contributions = profile.get('contributions', 0)
     
-    # --- CORRECTION: Function only accepts 'ga' ---
-    # We calculate the total tax liability on the current balance.
+    # Calculate Luxury Tax exposure (Corrected: takes 1 argument)
     potential_tax = calculate_luxury_tax(current_ga)
     
     # 3. Build UI
@@ -97,4 +96,6 @@ def show_dashboard():
                             ui.icon(icon).classes(color)
                             with ui.column().classes('gap-0'):
                                 ui.label(session['date']).classes('text-white text-sm font-bold')
-                                ui.label(f"Start: €
+                                ui.label(f"Start: €{session['start_ga']}").classes('text-xs text-slate-500')
+                        
+                        ui.label(f"€{pnl:+}").classes(f'text-lg font-bold {color}')
