@@ -4,7 +4,7 @@ import random
 import asyncio
 import traceback
 import numpy as np
-import json  # <--- NEW IMPORT
+import json
 
 # Internal Imports
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
@@ -54,17 +54,17 @@ class SimulationWorker:
             session_overrides = overrides
 
         # --- RATCHET SETUP ---
-        ratchet_triggered = False
-        
         if use_ratchet and not is_active_penalty:
+            # Re-instantiate to ensure we don't mutate the global config object
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit,
                 stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=1000, 
+                profit_lock_units=1000, # Infinite target (Ladder Logic handles stop)
                 press_trigger_wins=overrides.press_trigger_wins,
                 press_depth=overrides.press_depth,
                 ratchet_enabled=True,
-                ratchet_lock_pct=0.0, 
+                ratchet_mode=overrides.ratchet_mode, # Pass the mode
+                ratchet_lock_pct=0.0,
                 shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy
             )
@@ -267,6 +267,7 @@ def show_simulator():
             'risk_stop': slider_stop_loss.value,
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
+            'risk_ratch_mode': select_ratchet_mode.value, # NEW
             'gold_stat': select_status.value,
             'gold_earn': slider_earn_rate.value,
             'start_ga': slider_start_ga.value
@@ -307,6 +308,7 @@ def show_simulator():
         slider_stop_loss.value = config.get('risk_stop', 10)
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
+        select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard') # NEW
         select_status.value = config.get('gold_stat', 'Gold')
         slider_earn_rate.value = config.get('gold_earn', 10)
         slider_start_ga.value = config.get('start_ga', 2000)
@@ -364,6 +366,7 @@ def show_simulator():
                 'status_target_pts': SBM_TIERS[select_status.value],
                 'earn_rate': float(slider_earn_rate.value),
                 'use_ratchet': switch_ratchet.value,
+                'ratchet_mode': select_ratchet_mode.value, # PASS TO LOGIC
                 'use_tax': switch_luxury_tax.value,
                 'use_holiday': switch_holiday.value,
                 'hol_ceil': int(slider_holiday_ceil.value),
@@ -371,9 +374,6 @@ def show_simulator():
                 'safety': int(slider_safety.value),
                 'start_ga': int(slider_start_ga.value),
                 'press_depth': int(slider_press_depth.value),
-                'ratchet_pct': 0.0, # Not used in ladder mode
-                'ratchet_u': 0,     # Not used
-                'target_u': 0,      # Not used
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
             }
@@ -392,7 +392,8 @@ def show_simulator():
                 bet_strategy=bet_strat_enum,
                 shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value
+                ratchet_enabled=switch_ratchet.value,
+                ratchet_mode=select_ratchet_mode.value # PASS TO LOGIC
             )
 
             start_ga = config['start_ga']
@@ -574,13 +575,20 @@ def show_simulator():
                 lines.append(f"Tier Safety: {config['safety']}x | Penalty Box: {overrides.penalty_box_enabled}")
                 lines.append(f"Iron Gate: {overrides.iron_gate_limit} Losses")
                 lines.append(f"Pressing: Trigger {overrides.press_trigger_wins} Wins | Depth {overrides.press_depth}")
-                lines.append(f"Risk: Stop {overrides.stop_loss_units}u | Target {overrides.profit_lock_units}u")
                 
-                # UPDATED RATCHET TEXT (FIXED JSON SAFE)
+                # UPDATED RATCHET TEXT (MODE AWARE)
                 if overrides.ratchet_enabled:
-                    lines.append(f"Ratchet: ON (Ladder: +8>3, +12>5, +16>7, +20>ColorUp)")
+                    lines.append(f"Ratchet: ON (Mode: {overrides.ratchet_mode.upper()})")
+                    if overrides.ratchet_mode == "Sprint":
+                        lines.append(f"   Ladders: +6>3, +9>5, +12>8, +15>STOP")
+                    elif overrides.ratchet_mode == "Standard":
+                        lines.append(f"   Ladders: +8>3, +12>5, +16>7, +20>STOP")
+                    elif overrides.ratchet_mode == "Deep Stack":
+                        lines.append(f"   Ladders: +10>4, +15>8, +25>15, +40>STOP")
                 else:
-                    lines.append(f"Ratchet: OFF")
+                    lines.append(f"Ratchet: OFF (Stop at {overrides.profit_lock_units}u)")
+                    
+                lines.append(f"Risk: Stop {overrides.stop_loss_units}u")
 
                 lines.append("\n=== PERFORMANCE RESULTS ===")
                 lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
@@ -600,7 +608,6 @@ def show_simulator():
                 report_text = f"Report Error: {str(e)}"
 
             with ui.expansion('AI Analysis Data', icon='analytics').classes('w-full bg-slate-800 text-slate-400 mb-4'):
-                # SECURE COPY BUTTON USING JSON SERIALIZATION
                 json_report = json.dumps(report_text)
                 ui.button('COPY', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText({json_report})')).props('flat dense icon=content_copy color=white').classes('absolute top-2 right-12 z-10')
                 ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{report_text}</pre>', sanitize=False)
@@ -777,20 +784,8 @@ def show_simulator():
                     with ui.row().classes('items-center justify-between'):
                          switch_ratchet = ui.switch('Ratchet').props('color=gold')
                          with ui.column():
-                             ui.label('Lock (at Target)').classes('text-xs text-yellow-400')
-                             # Ratchet Units Slider
-                             slider_ratchet_units = ui.slider(min=1, max=9, step=1, value=4).props('color=gold')
-                             ui.label().bind_text_from(slider_ratchet_units, 'value', lambda v: f'{v} Units')
-
-                    # Reactivity: When Profit Target changes, update Ratchet Max
-                    def update_ratchet_max(e):
-                        new_max = int(e.value - 1) # Max lock is Target - 1
-                        if new_max < 1: new_max = 1
-                        slider_ratchet_units.props(f'max={new_max}')
-                        if slider_ratchet_units.value > new_max:
-                            slider_ratchet_units.set_value(new_max)
-                    
-                    slider_profit.on('change', update_ratchet_max)
+                             ui.label('Mode').classes('text-xs text-yellow-400')
+                             select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack'], value='Standard').props('dense options-dense').classes('w-32')
 
                     ui.label('Status Target').classes('text-xs text-yellow-400 mt-2')
                     select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').classes('w-full')
