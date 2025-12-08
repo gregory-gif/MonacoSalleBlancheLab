@@ -4,6 +4,7 @@ import random
 import asyncio
 import traceback
 import numpy as np
+import json  # <--- NEW IMPORT
 
 # Internal Imports
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
@@ -55,17 +56,15 @@ class SimulationWorker:
         # --- RATCHET SETUP ---
         ratchet_triggered = False
         
-        # If Ratchet ON, we override the standard profit lock to be "Infinite"
-        # The engine logic handles the specific ladder stops (8->3, 12->5, etc)
         if use_ratchet and not is_active_penalty:
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit,
                 stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=1000, # Infinite target
+                profit_lock_units=1000, 
                 press_trigger_wins=overrides.press_trigger_wins,
                 press_depth=overrides.press_depth,
                 ratchet_enabled=True,
-                ratchet_lock_pct=0.0, # Not used in Ladder mode
+                ratchet_lock_pct=0.0, 
                 shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy
             )
@@ -83,8 +82,6 @@ class SimulationWorker:
             bet = decision['bet_amount']
             volume += bet
             
-            # Note: Ladder logic checks are handled inside BaccaratStrategist.update_state_after_hand
-            # We just check here if we hit the floor
             if use_ratchet and not is_active_penalty:
                 if state.session_pnl <= state.locked_profit and state.locked_profit > -9999:
                      break
@@ -270,7 +267,6 @@ def show_simulator():
             'risk_stop': slider_stop_loss.value,
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
-            # 'risk_ratch_units': No longer used
             'gold_stat': select_status.value,
             'gold_earn': slider_earn_rate.value,
             'start_ga': slider_start_ga.value
@@ -311,7 +307,6 @@ def show_simulator():
         slider_stop_loss.value = config.get('risk_stop', 10)
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
-        # slider_ratchet_units.value = config.get('risk_ratch_units', 4) 
         select_status.value = config.get('gold_stat', 'Gold')
         slider_earn_rate.value = config.get('gold_earn', 10)
         slider_start_ga.value = config.get('start_ga', 2000)
@@ -376,7 +371,9 @@ def show_simulator():
                 'safety': int(slider_safety.value),
                 'start_ga': int(slider_start_ga.value),
                 'press_depth': int(slider_press_depth.value),
-                'ratchet_pct': 0.0, # Ignored in ladder mode
+                'ratchet_pct': 0.0, # Not used in ladder mode
+                'ratchet_u': 0,     # Not used
+                'target_u': 0,      # Not used
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
             }
@@ -579,7 +576,7 @@ def show_simulator():
                 lines.append(f"Pressing: Trigger {overrides.press_trigger_wins} Wins | Depth {overrides.press_depth}")
                 lines.append(f"Risk: Stop {overrides.stop_loss_units}u | Target {overrides.profit_lock_units}u")
                 
-                # UPDATED RATCHET TEXT
+                # UPDATED RATCHET TEXT (FIXED JSON SAFE)
                 if overrides.ratchet_enabled:
                     lines.append(f"Ratchet: ON (Ladder: +8>3, +12>5, +16>7, +20>ColorUp)")
                 else:
@@ -603,7 +600,9 @@ def show_simulator():
                 report_text = f"Report Error: {str(e)}"
 
             with ui.expansion('AI Analysis Data', icon='analytics').classes('w-full bg-slate-800 text-slate-400 mb-4'):
-                ui.button('COPY', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText(`{report_text}`)')).props('flat dense icon=content_copy color=white').classes('absolute top-2 right-12 z-10')
+                # SECURE COPY BUTTON USING JSON SERIALIZATION
+                json_report = json.dumps(report_text)
+                ui.button('COPY', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText({json_report})')).props('flat dense icon=content_copy color=white').classes('absolute top-2 right-12 z-10')
                 ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{report_text}</pre>', sanitize=False)
 
     # --- LAYOUT ---
@@ -777,8 +776,21 @@ def show_simulator():
                     # RATCHET ROW
                     with ui.row().classes('items-center justify-between'):
                          switch_ratchet = ui.switch('Ratchet').props('color=gold')
-                         # Removed Unit Slider (Ladder Mode)
-                         ui.label('Ladder Mode Active').classes('text-xs text-yellow-400 italic')
+                         with ui.column():
+                             ui.label('Lock (at Target)').classes('text-xs text-yellow-400')
+                             # Ratchet Units Slider
+                             slider_ratchet_units = ui.slider(min=1, max=9, step=1, value=4).props('color=gold')
+                             ui.label().bind_text_from(slider_ratchet_units, 'value', lambda v: f'{v} Units')
+
+                    # Reactivity: When Profit Target changes, update Ratchet Max
+                    def update_ratchet_max(e):
+                        new_max = int(e.value - 1) # Max lock is Target - 1
+                        if new_max < 1: new_max = 1
+                        slider_ratchet_units.props(f'max={new_max}')
+                        if slider_ratchet_units.value > new_max:
+                            slider_ratchet_units.set_value(new_max)
+                    
+                    slider_profit.on('change', update_ratchet_max)
 
                     ui.label('Status Target').classes('text-xs text-yellow-400 mt-2')
                     select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').classes('w-full')
