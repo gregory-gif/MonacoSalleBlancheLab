@@ -1,13 +1,14 @@
-from nicegui import ui
+from nicegui import ui, app # <--- Added 'app' for Render/Gunicorn
 from ui.scorecard import Scorecard
 from ui.dashboard import show_dashboard
 from ui.simulator import show_simulator
-from ui.session_log import show_session_log # <--- New Import
+from ui.session_log import show_session_log 
 
 # 1. APP CONFIGURATION
 ui.dark_mode().enable() 
 
 # 2. CONTENT CONTAINER
+# We define this globally so all load_functions can access it
 content = ui.column().classes('w-full items-center')
 
 def load_cockpit():
@@ -28,7 +29,7 @@ def load_simulator():
 def load_session_log():
     content.clear()
     with content:
-        show_session_log() # <--- Load the new module
+        show_session_log()
 
 # 3. LAYOUT & SIDEBAR
 with ui.header().classes('bg-slate-900 text-white shadow-lg items-center'):
@@ -46,7 +47,6 @@ with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawe
         with ui.column().classes('gap-2 w-full'):
             ui.button('DASHBOARD', icon='analytics', on_click=load_dashboard).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
             ui.button('LIVE COCKPIT', icon='casino', on_click=load_cockpit).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-            # New Button Added Here
             ui.button('SESSION LOG', icon='history', on_click=load_session_log).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
             ui.button('SIMULATOR', icon='science', on_click=load_simulator).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
         
@@ -62,4 +62,4 @@ with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawe
 load_dashboard()
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title='Salle Blanche Lab', port=8080, reload=True, favicon='♠️', show=True)
+    ui.run(title='Salle Blanche Lab', port=8080, reload=True, favicon='♠️')
