@@ -151,6 +151,9 @@ class SimulationWorker:
         current_year_points = 0
         current_year_pnl = 0.0
         
+        # New Metric: Did we survive Year 1?
+        failed_year_one = False
+        
         for m in range(total_months):
             if m > 0 and m % 12 == 0:
                 current_year_points = 0
@@ -179,6 +182,8 @@ class SimulationWorker:
             can_play = (current_ga >= insolvency_floor)
             if not can_play:
                 m_insolvent_months += 1
+                if m < 12: # If we are insolvent in the first 12 months
+                    failed_year_one = True
             
             expected_sessions = int((m + 1) * (sessions_per_year / 12))
             sessions_due = expected_sessions - sessions_played_total
@@ -217,7 +222,8 @@ class SimulationWorker:
             'holidays': m_holidays,
             'insolvent_months': m_insolvent_months,
             'total_volume': m_total_volume,
-            'gold_year': gold_hit_year
+            'gold_year': gold_hit_year,
+            'failed_y1': failed_year_one
         }
 
 def show_simulator():
@@ -353,7 +359,6 @@ def show_simulator():
             # --- CONFIG ---
             bet_strat_enum = BetStrategy.BANKER if select_bet_strat.value == 'Banker' else BetStrategy.PLAYER
             
-            # CALCULATE PERCENTAGE FROM HUMAN UNITS
             target_u = int(slider_profit.value)
             lock_u = int(slider_ratchet_units.value)
             calc_pct = lock_u / target_u if target_u > 0 else 0.5
@@ -465,16 +470,17 @@ def show_simulator():
         insolvency_pct = (avg_insolvent / total_months) * 100
         active_pct = 100 - insolvency_pct
         
+        # New: Year 1 Survival Calculation
+        y1_failures = len([r for r in results if r['failed_y1']])
+        y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
+        
         # --- COST CALCULATIONS ---
         avg_monthly_cost = avg_contrib / total_months
-        
-        # 2. Real Monthly Cost (Net worth drop)
         total_input = start_ga + avg_contrib
         total_output = avg_final_ga + avg_tax
-        grand_total_wealth = total_output # Total Wealth Generated
+        grand_total_wealth = total_output
         net_cost = total_input - total_output
         real_monthly_cost = net_cost / total_months
-        
         net_life_result = total_output - total_input
         
         # Grade Calculation
@@ -502,15 +508,13 @@ def show_simulator():
             with ui.card().classes('w-full bg-slate-800 p-4 border-l-8').style(f'border-color: {"#ef4444" if grade=="F" else "#4ade80"}'):
                 with ui.column().classes('w-full gap-4'):
                     
-                    # 1. HEADER ROW: Grade & Top Financials
+                    # 1. HEADER ROW
                     with ui.row().classes('w-full items-center justify-between'):
-                        # Grade
                         with ui.column():
                             ui.label('STRATEGY GRADE').classes('text-xs text-slate-400 font-bold tracking-widest')
                             ui.label(f"{grade}").classes(f'text-6xl font-black {g_col} leading-none')
                             ui.label(f"{total_score:.1f}% Score").classes(f'text-sm font-bold {g_col}')
                         
-                        # Real Cost
                         with ui.column().classes('items-center'):
                             ui.label('REAL MONTHLY COST').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             if real_monthly_cost > 0:
@@ -520,49 +524,43 @@ def show_simulator():
                                 ui.label(f"+€{abs(real_monthly_cost):,.0f}").classes('text-4xl font-black text-green-400 leading-none')
                                 ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
 
-                        # Grand Total Wealth (GA + Tax)
                         with ui.column().classes('items-center'):
                             ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             ui.label(f"€{grand_total_wealth:,.0f}").classes('text-4xl font-black text-white leading-none')
-                            
                             if avg_tax > 0:
                                 ui.label(f"(GA €{avg_final_ga:,.0f} + Tax €{avg_tax:,.0f})").classes('text-xs font-bold text-yellow-400')
                             else:
-                                pnl_color = 'text-green-400' if avg_final_ga >= start_ga else 'text-red-400'
-                                ui.label("Zero Tax Withdrawn").classes(f'text-xs font-bold {pnl_color}')
+                                ui.label("Zero Tax").classes(f'text-xs font-bold text-slate-500')
 
                     ui.separator().classes('bg-slate-700')
 
-                    # 2. DETAIL ROW: Efficiency Metrics
+                    # 2. DETAIL ROW
                     with ui.grid(columns=4).classes('w-full gap-4'):
                         
-                        # Gold Prob
                         with ui.column().classes('items-center'):
                             ui.label('Gold Chase').classes('text-[10px] text-slate-500 uppercase')
                             ui.label(f"{score_gold:.0f}%").classes('text-2xl font-bold text-yellow-400')
                             if gold_prob > 0:
                                 ui.label(f"Year {avg_year_hit:.1f}").classes('text-[10px] text-slate-500')
 
-                        # Survival
                         with ui.column().classes('items-center'):
-                            ui.label('Survival').classes('text-[10px] text-slate-500 uppercase')
-                            ui.label(f"{score_survival:.0f}%").classes('text-2xl font-bold text-blue-400')
+                            ui.label('Year 1 Survival').classes('text-[10px] text-slate-500 uppercase')
+                            y1_color = 'text-green-400' if y1_survival_rate == 100 else 'text-red-400'
+                            ui.label(f"{y1_survival_rate:.1f}%").classes(f'text-2xl font-bold {y1_color}')
+                            ui.label('Infancy Risk').classes('text-[10px] text-slate-500')
 
-                        # Cost Efficiency
                         with ui.column().classes('items-center'):
                             ui.label('Cost Effic.').classes('text-[10px] text-slate-500 uppercase')
                             ui.label(f"{score_cost:.0f}%").classes('text-2xl font-bold text-green-400')
 
-                        # Active Play
                         with ui.column().classes('items-center'):
-                            ui.label('Active Play').classes('text-[10px] text-slate-500 uppercase')
-                            ui.label(f"{score_time:.0f}%").classes('text-2xl font-bold text-purple-400')
+                            ui.label('Total Survival').classes('text-[10px] text-slate-500 uppercase')
+                            ui.label(f"{score_survival:.0f}%").classes('text-2xl font-bold text-blue-400')
 
         # CHART
         with chart_container:
             chart_container.clear()
             fig = go.Figure()
-            # Changed fill color to be more opaque (0.5) and added visible lines (0.3)
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.5)', line=dict(color='rgba(255,255,255,0.3)', width=1), name='Best/Worst'))
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
             fig.add_trace(go.Scatter(x=months, y=mean_line, mode='lines', name='Average', line=dict(color='white', width=2)))
@@ -593,14 +591,14 @@ def show_simulator():
                 lines.append(f"Pressing: Trigger {overrides.press_trigger_wins} Wins | Depth {overrides.press_depth}")
                 lines.append(f"Risk: Stop {overrides.stop_loss_units}u | Target {overrides.profit_lock_units}u")
                 
-                # HUMAN MATH DISPLAY
                 if overrides.ratchet_enabled:
                     lines.append(f"Ratchet: ON (Lock {config['ratchet_u']}u at {config['target_u']}u Target)")
                 else:
                     lines.append(f"Ratchet: OFF")
 
                 lines.append("\n=== PERFORMANCE RESULTS ===")
-                lines.append(f"Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
+                lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
+                lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
                 lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
                 if avg_tax > 0:
                     lines.append(f"   -> Final GA: €{avg_final_ga:,.0f}")
@@ -696,9 +694,9 @@ def show_simulator():
                     with ui.row().classes('w-full justify-between'):
                         ui.label('Contrib (Loss)').classes('text-xs text-orange-400')
                         lbl_contrib_loss = ui.label()
-                    slider_contrib_loss = ui.slider(min=0, max=1000, value=300).props('color=orange')
+                    slider_contrib_loss = ui.slider(min=0, max=1000, value=200).props('color=orange')
                     lbl_contrib_loss.bind_text_from(slider_contrib_loss, 'value', lambda v: f'€{v}')
-                    lbl_contrib_loss.set_text('€300')
+                    lbl_contrib_loss.set_text('€200')
                 
                 with ui.column():
                     switch_luxury_tax = ui.switch('Tax').props('color=gold')
