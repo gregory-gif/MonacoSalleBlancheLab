@@ -1,14 +1,23 @@
 from nicegui import ui
+from typing import Dict, Callable
 
-def create_layout():
+def create_layout(nav_funcs: Dict[str, Callable]) -> ui.column:
     """
     Builds the main cockpit frame: Header, Sidebar, and Content Container.
+    
+    Args:
+        nav_funcs: A dictionary mapping keys ('dashboard', 'cockpit', 'simulator', 'logs')
+                   to their respective load functions in main.py.
+                   
+    Returns:
+        The main content ui.column() where pages should be rendered.
     """
     # ---------------------------------------------------------
     # 1. HEADER (The Status Bar)
     # ---------------------------------------------------------
     with ui.header().classes('bg-slate-900 text-white shadow-lg items-center'):
         # Menu Button (toggles sidebar)
+        # Note: We use a deferred lambda to access left_drawer which is defined below
         ui.button(on_click=lambda: left_drawer.toggle(), icon='menu').props('flat color=white')
         
         # Title
@@ -31,9 +40,10 @@ def create_layout():
             ui.label('MODULES').classes('text-slate-500 text-xs font-bold tracking-wider')
             
             with ui.column().classes('gap-2 w-full'):
-                ui.button('LIVE COCKPIT', icon='casino').props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-                ui.button('SIMULATOR', icon='science').props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-                ui.button('SESSION LOG', icon='history').props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+                ui.button('DASHBOARD', icon='analytics', on_click=nav_funcs['dashboard']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+                ui.button('LIVE COCKPIT', icon='casino', on_click=nav_funcs['cockpit']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+                ui.button('SIMULATOR', icon='science', on_click=nav_funcs['simulator']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+                ui.button('SESSION LOG', icon='history', on_click=nav_funcs['logs']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
             
             ui.separator().classes('bg-slate-700 my-2')
             
@@ -49,10 +59,9 @@ def create_layout():
                 ui.label('After every press — win or lose.').classes('text-[10px] text-slate-500')
 
     # ---------------------------------------------------------
-    # 3. MAIN CONTENT AREA (Placeholder)
+    # 3. MAIN CONTENT CONTAINER
     # ---------------------------------------------------------
-    # This is where the Scorecard or Dashboard will eventually load
-    with ui.column().classes('w-full p-8 items-center justify-center text-center'):
-        ui.icon('table_restaurant', size='4xl').classes('text-slate-700 mb-4')
-        ui.label('System Ready').classes('text-2xl font-light text-slate-300')
-        ui.label('Select a module from the sidebar to begin.').classes('text-slate-500')
+    # This container is returned to main.py so it can be cleared and refilled
+    content = ui.column().classes('w-full items-center min-h-screen bg-slate-950')
+    
+    return content
