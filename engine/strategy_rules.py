@@ -40,9 +40,10 @@ class StrategyOverrides:
     
     # 3. Ratchet & Survival
     ratchet_enabled: bool = False
-    ratchet_lock_pct: float = 0.50   # Lock 50% of peak profit
-    shoe3_survival_trigger: int = 5  # Units needed to trigger Shoe 3 defense
-    shoe3_drop_limit: int = 1        # Units allowed to drop to in Shoe 3
+    ratchet_mode: str = "Standard" # 'Sprint', 'Standard', 'Deep Stack'
+    ratchet_lock_pct: float = 0.50   
+    shoe3_survival_trigger: int = 5  
+    shoe3_drop_limit: int = 1        
     
     # 4. Financials
     tax_threshold: float = 12500.0
@@ -118,10 +119,22 @@ class BaccaratStrategist:
         if state.session_pnl <= state.locked_profit or state.session_pnl <= stop_limit:
             return {'bet_amount': 0, 'reason': "STOP LOSS / RATCHET HIT", 'mode': PlayMode.STOPPED}
         
-        # B. THE COLOR UP RULE (Hardcap at 20 units)
-        # If we hit +20 units, we leave immediately.
-        if state.session_pnl >= (base_unit * 20):
-             return {'bet_amount': 0, 'reason': "COLOR UP! (+20 Units)", 'mode': PlayMode.STOPPED}
+        # B. THE COLOR UP RULE (Dynamic based on Mode)
+        # If Ratchet is ON, we rely on the specific Mode's cap.
+        # If Ratchet is OFF, we rely on the Slider Target.
+        if state.overrides and state.overrides.ratchet_enabled:
+            mode = state.overrides.ratchet_mode
+            cap_u = 20 # Default Standard
+            
+            if mode == "Sprint": cap_u = 15
+            elif mode == "Deep Stack": cap_u = 40
+            
+            if state.session_pnl >= (base_unit * cap_u):
+                return {'bet_amount': 0, 'reason': f"COLOR UP! ({mode} +{cap_u}u)", 'mode': PlayMode.STOPPED}
+        
+        elif state.session_pnl >= profit_target:
+             # Ratchet OFF - Standard Slider Target
+             return {'bet_amount': 0, 'reason': "PROFIT TARGET SECURED", 'mode': PlayMode.STOPPED}
 
         # C. Last Shoe Survival Rule
         if state.current_shoe == shoes_max:
@@ -133,10 +146,6 @@ class BaccaratStrategist:
                      return {'bet_amount': 0, 'reason': "FINAL SHOE SURVIVAL STOP", 'mode': PlayMode.STOPPED}
                 base_unit = state.tier.base_unit 
                 press_unit = state.tier.base_unit
-
-        # D. Standard Profit Target (Disabled if Ratchet is ON)
-        if not state.overrides.ratchet_enabled and state.session_pnl >= profit_target:
-            return {'bet_amount': 0, 'reason': "PROFIT TARGET SECURED", 'mode': PlayMode.STOPPED}
 
         # WATCHER (IRON GATE)
         if state.mode == PlayMode.WATCHER:
@@ -174,28 +183,39 @@ class BaccaratStrategist:
         state.hands_played_in_shoe += 1
         state.hands_played_total += 1
         
-        # --- NEW LADDER RATCHET LOGIC ---
+        # --- NEW DYNAMIC RATCHET LADDER LOGIC ---
         if state.session_pnl > state.peak_session_pnl:
             state.peak_session_pnl = state.session_pnl
             
             if state.overrides and state.overrides.ratchet_enabled:
                 base = state.tier.base_unit
                 current_u = state.peak_session_pnl / base
+                mode = state.overrides.ratchet_mode
                 
-                # 1ST LOCK: Reach +8 > Lock +3
-                if current_u >= 8 and current_u < 12:
-                    lock_val = 3 * base
-                    if lock_val > state.locked_profit: state.locked_profit = lock_val
+                new_lock = state.locked_profit # Start with current lock
                 
-                # 2ND LOCK: Reach +12 > Lock +5
-                elif current_u >= 12 and current_u < 16:
-                    lock_val = 5 * base
-                    if lock_val > state.locked_profit: state.locked_profit = lock_val
-                    
-                # 3RD LOCK: Reach +16 > Lock +7
-                elif current_u >= 16:
-                    lock_val = 7 * base
-                    if lock_val > state.locked_profit: state.locked_profit = lock_val
+                # --- MODE 1: SPRINT (Short / Aggressive Lock) ---
+                if mode == "Sprint":
+                    # Cap is 15u (Handled in get_next_decision)
+                    if current_u >= 12: new_lock = max(new_lock, 8 * base)
+                    elif current_u >= 9: new_lock = max(new_lock, 5 * base)
+                    elif current_u >= 6: new_lock = max(new_lock, 3 * base)
+
+                # --- MODE 2: STANDARD (Balanced) ---
+                elif mode == "Standard":
+                    # Cap is 20u
+                    if current_u >= 16: new_lock = max(new_lock, 7 * base)
+                    elif current_u >= 12: new_lock = max(new_lock, 5 * base)
+                    elif current_u >= 8: new_lock = max(new_lock, 3 * base)
+
+                # --- MODE 3: DEEP STACK (Long Haul) ---
+                elif mode == "Deep Stack":
+                    # Cap is 40u
+                    if current_u >= 25: new_lock = max(new_lock, 15 * base)
+                    elif current_u >= 15: new_lock = max(new_lock, 8 * base)
+                    elif current_u >= 10: new_lock = max(new_lock, 4 * base)
+                
+                state.locked_profit = new_lock
 
         # Watcher Reset
         if state.mode == PlayMode.WATCHER:
