@@ -2,39 +2,61 @@ import json
 import os
 from datetime import datetime
 
-# File where we store the Director's data
+# File where we store the Director's data AND Strategy Library
 DATA_FILE = 'lab_data.json'
 
 DEFAULT_PROFILE = {
-    "ga": 1700.0,          # Game Account (Starting Bankroll)
+    # --- LIVE TRACKER DATA ---
+    "ga": 1700.0,          # Game Account (Real Money)
     "ytd_pnl": 0.0,        # Year-to-Date Profit/Loss
     "contributions": 0.0,  # Total Monthly Contributions
     "luxury_tax_paid": 0.0,
     "sessions_played": 0,
     "current_tier": 1,
-    "history": []          # Log of all sessions
+    "history": [],         # Log of all real sessions
+    
+    # --- SIMULATOR LIBRARY ---
+    "saved_strategies": {} # Presets for the Simulator
 }
 
 def load_profile():
-    """Loads the profile from disk. If missing, creates a default one."""
+    """
+    Loads the profile from disk. If missing or corrupt, returns default.
+    Ensures 'saved_strategies' key always exists.
+    """
     if not os.path.exists(DATA_FILE):
         save_profile(DEFAULT_PROFILE)
-        return DEFAULT_PROFILE
+        return DEFAULT_PROFILE.copy()
     
     try:
         with open(DATA_FILE, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+            
+        # Migration: Ensure new keys exist if loading an old file
+        if "saved_strategies" not in data:
+            data["saved_strategies"] = {}
+        if "history" not in data:
+            data["history"] = []
+            
+        return data
+        
     except (json.JSONDecodeError, IOError):
-        # Backup corrupt file if needed, but for now just reset
-        return DEFAULT_PROFILE
+        print(f"⚠️ Warning: Could not read {DATA_FILE}. Returning defaults.")
+        return DEFAULT_PROFILE.copy()
 
 def save_profile(data):
     """Writes the profile to disk."""
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+    try:
+        with open(DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+    except IOError as e:
+        print(f"❌ Error saving profile: {e}")
 
 def log_session_result(start_ga: float, end_ga: float, shoes_played: int):
-    """Updates the profile after a session ends."""
+    """
+    Updates the Live Profile after a REAL session ends.
+    (Used by dashboard.py, not the simulator)
+    """
     profile = load_profile()
     
     session_pnl = end_ga - start_ga
