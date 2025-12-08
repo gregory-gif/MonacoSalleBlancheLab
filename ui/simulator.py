@@ -47,28 +47,25 @@ class SimulationWorker:
                 bet_strategy=overrides.bet_strategy,
                 press_trigger_wins=999, 
                 press_depth=0,
-                ratchet_enabled=False # Force off in penalty
+                ratchet_enabled=False 
             )
         else:
             session_overrides = overrides
 
         # --- RATCHET SETUP ---
-        trigger_profit_amount = 0
         ratchet_triggered = False
         
-        # Logic: If Ratchet is ON, we disable the standard Profit Lock stop
+        # If Ratchet ON, we override the standard profit lock to be "Infinite"
+        # The engine logic handles the specific ladder stops (8->3, 12->5, etc)
         if use_ratchet and not is_active_penalty:
-            trigger_profit_amount = overrides.profit_lock_units * tier.base_unit
-            
-            # We recreate the overrides to "Infinite" target so Strategist doesn't stop us
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit,
                 stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=1000, # effectively infinite
+                profit_lock_units=1000, # Infinite target
                 press_trigger_wins=overrides.press_trigger_wins,
                 press_depth=overrides.press_depth,
                 ratchet_enabled=True,
-                ratchet_lock_pct=overrides.ratchet_lock_pct,
+                ratchet_lock_pct=0.0, # Not used in Ladder mode
                 shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy
             )
@@ -86,11 +83,11 @@ class SimulationWorker:
             bet = decision['bet_amount']
             volume += bet
             
+            # Note: Ladder logic checks are handled inside BaccaratStrategist.update_state_after_hand
+            # We just check here if we hit the floor
             if use_ratchet and not is_active_penalty:
-                if not ratchet_triggered and state.session_pnl >= trigger_profit_amount:
-                    ratchet_triggered = True
-                if ratchet_triggered and state.session_pnl <= state.locked_profit:
-                    break 
+                if state.session_pnl <= state.locked_profit and state.locked_profit > -9999:
+                     break
 
             # --- PHYSICS ---
             rnd = random.random()
@@ -155,7 +152,6 @@ class SimulationWorker:
         current_year_points = 0
         current_year_pnl = 0.0
         
-        # Track Year 1 Survival
         failed_year_one = False
         
         for m in range(total_months):
@@ -274,7 +270,7 @@ def show_simulator():
             'risk_stop': slider_stop_loss.value,
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
-            'risk_ratch_units': slider_ratchet_units.value,
+            # 'risk_ratch_units': No longer used
             'gold_stat': select_status.value,
             'gold_earn': slider_earn_rate.value,
             'start_ga': slider_start_ga.value
@@ -315,7 +311,7 @@ def show_simulator():
         slider_stop_loss.value = config.get('risk_stop', 10)
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
-        slider_ratchet_units.value = config.get('risk_ratch_units', 4) 
+        # slider_ratchet_units.value = config.get('risk_ratch_units', 4) 
         select_status.value = config.get('gold_stat', 'Gold')
         slider_earn_rate.value = config.get('gold_earn', 10)
         slider_start_ga.value = config.get('start_ga', 2000)
@@ -363,10 +359,6 @@ def show_simulator():
             # --- CONFIG ---
             bet_strat_enum = BetStrategy.BANKER if select_bet_strat.value == 'Banker' else BetStrategy.PLAYER
             
-            target_u = int(slider_profit.value)
-            lock_u = int(slider_ratchet_units.value)
-            calc_pct = lock_u / target_u if target_u > 0 else 0.5
-            
             config = {
                 'num_sims': int(slider_num_sims.value),
                 'years': int(slider_years.value),
@@ -384,9 +376,7 @@ def show_simulator():
                 'safety': int(slider_safety.value),
                 'start_ga': int(slider_start_ga.value),
                 'press_depth': int(slider_press_depth.value),
-                'ratchet_pct': calc_pct, 
-                'ratchet_u': lock_u,     
-                'target_u': target_u,    
+                'ratchet_pct': 0.0, # Ignored in ladder mode
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
             }
@@ -399,13 +389,13 @@ def show_simulator():
                 profit_lock_units=int(slider_profit.value),
                 press_trigger_wins=int(select_press.value),
                 press_depth=config['press_depth'],
-                ratchet_lock_pct=config['ratchet_pct'],
+                ratchet_lock_pct=0.0,
                 tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'],
                 bet_strategy=bet_strat_enum,
                 shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value # <--- CRITICAL FIX: Passing the switch value
+                ratchet_enabled=switch_ratchet.value
             )
 
             start_ga = config['start_ga']
@@ -475,11 +465,9 @@ def show_simulator():
         insolvency_pct = (avg_insolvent / total_months) * 100
         active_pct = 100 - insolvency_pct
         
-        # New: Year 1 Survival Calculation
         y1_failures = len([r for r in results if r['failed_y1']])
         y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
         
-        # --- COST CALCULATIONS ---
         avg_monthly_cost = avg_contrib / total_months
         total_input = start_ga + avg_contrib
         total_output = avg_final_ga + avg_tax
@@ -488,14 +476,11 @@ def show_simulator():
         real_monthly_cost = net_cost / total_months
         net_life_result = total_output - total_input
         
-        # Grade Calculation
         survivor_count = len([r for r in results if r['final_ga'] >= 1500])
         score_survival = (survivor_count / len(results)) * 100
         
-        if real_monthly_cost <= 0:
-            score_cost = 100
-        else:
-            score_cost = max(0, 100 - (real_monthly_cost / 3)) 
+        if real_monthly_cost <= 0: score_cost = 100
+        else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
             
         score_time = active_pct
         score_gold = gold_prob
@@ -513,7 +498,6 @@ def show_simulator():
             with ui.card().classes('w-full bg-slate-800 p-4 border-l-8').style(f'border-color: {"#ef4444" if grade=="F" else "#4ade80"}'):
                 with ui.column().classes('w-full gap-4'):
                     
-                    # 1. HEADER ROW
                     with ui.row().classes('w-full items-center justify-between'):
                         with ui.column():
                             ui.label('STRATEGY GRADE').classes('text-xs text-slate-400 font-bold tracking-widest')
@@ -539,7 +523,6 @@ def show_simulator():
 
                     ui.separator().classes('bg-slate-700')
 
-                    # 2. DETAIL ROW
                     with ui.grid(columns=4).classes('w-full gap-4'):
                         
                         with ui.column().classes('items-center'):
@@ -596,8 +579,9 @@ def show_simulator():
                 lines.append(f"Pressing: Trigger {overrides.press_trigger_wins} Wins | Depth {overrides.press_depth}")
                 lines.append(f"Risk: Stop {overrides.stop_loss_units}u | Target {overrides.profit_lock_units}u")
                 
+                # UPDATED RATCHET TEXT
                 if overrides.ratchet_enabled:
-                    lines.append(f"Ratchet: ON (Lock {config['ratchet_u']}u at {config['target_u']}u Target)")
+                    lines.append(f"Ratchet: ON (Ladder: +8>3, +12>5, +16>7, +20>ColorUp)")
                 else:
                     lines.append(f"Ratchet: OFF")
 
@@ -668,7 +652,7 @@ def show_simulator():
                         lbl_frequency = ui.label()
                     slider_frequency = ui.slider(min=9, max=50, value=10).props('color=blue')
                     lbl_frequency.bind_text_from(slider_frequency, 'value', lambda v: f'{v}')
-                    lbl_frequency.set_text('9') 
+                    lbl_frequency.set_text('10') 
 
                 with ui.column().classes('w-1/2'):
                     ui.label('LADDER PREVIEW').classes('font-bold text-white mb-2')
@@ -699,9 +683,9 @@ def show_simulator():
                     with ui.row().classes('w-full justify-between'):
                         ui.label('Contrib (Loss)').classes('text-xs text-orange-400')
                         lbl_contrib_loss = ui.label()
-                    slider_contrib_loss = ui.slider(min=0, max=1000, value=200).props('color=orange')
+                    slider_contrib_loss = ui.slider(min=0, max=1000, value=300).props('color=orange')
                     lbl_contrib_loss.bind_text_from(slider_contrib_loss, 'value', lambda v: f'€{v}')
-                    lbl_contrib_loss.set_text('€200')
+                    lbl_contrib_loss.set_text('€300')
                 
                 with ui.column():
                     switch_luxury_tax = ui.switch('Tax').props('color=gold')
@@ -793,21 +777,8 @@ def show_simulator():
                     # RATCHET ROW
                     with ui.row().classes('items-center justify-between'):
                          switch_ratchet = ui.switch('Ratchet').props('color=gold')
-                         with ui.column():
-                             ui.label('Lock (at Target)').classes('text-xs text-yellow-400')
-                             # Ratchet Units Slider
-                             slider_ratchet_units = ui.slider(min=1, max=9, step=1, value=4).props('color=gold')
-                             ui.label().bind_text_from(slider_ratchet_units, 'value', lambda v: f'{v} Units')
-
-                    # Reactivity: When Profit Target changes, update Ratchet Max
-                    def update_ratchet_max(e):
-                        new_max = int(e.value - 1) # Max lock is Target - 1
-                        if new_max < 1: new_max = 1
-                        slider_ratchet_units.props(f'max={new_max}')
-                        if slider_ratchet_units.value > new_max:
-                            slider_ratchet_units.set_value(new_max)
-                    
-                    slider_profit.on('change', update_ratchet_max)
+                         # Removed Unit Slider (Ladder Mode)
+                         ui.label('Ladder Mode Active').classes('text-xs text-yellow-400 italic')
 
                     ui.label('Status Target').classes('text-xs text-yellow-400 mt-2')
                     select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').classes('w-full')
