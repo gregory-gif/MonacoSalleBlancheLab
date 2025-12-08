@@ -1,10 +1,3 @@
-It looks like you accidentally pasted my conversational text ("That is great news—the server is running\!") into the Python file along with the code. Python is trying to read that sentence as a command and failing.
-
-**To fix this, simply replace the entire content of `ui/simulator.py` with ONLY the code block below.**
-
-### `ui/simulator.py`
-
-```python
 from nicegui import ui
 import plotly.graph_objects as go
 import random
@@ -726,4 +719,3 @@ def show_simulator():
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
-```
