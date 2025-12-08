@@ -267,7 +267,7 @@ def show_simulator():
             'risk_stop': slider_stop_loss.value,
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
-            'risk_ratch_mode': select_ratchet_mode.value, # NEW
+            'risk_ratch_mode': select_ratchet_mode.value, 
             'gold_stat': select_status.value,
             'gold_earn': slider_earn_rate.value,
             'start_ga': slider_start_ga.value
@@ -297,7 +297,7 @@ def show_simulator():
         slider_tax_rate.value = config.get('eco_tax_rate', 25)
         switch_holiday.value = config.get('eco_hol', False)
         slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
-        slider_insolvency.value = config.get('eco_insolvency', 1500)
+        slider_insolvency.value = config.get('eco_insolvency', 1000) # CHANGED DEFAULT
         slider_safety.value = config.get('tac_safety', 25)
         slider_iron_gate.value = config.get('tac_iron', 3)
         select_press.value = config.get('tac_press', 1)
@@ -308,7 +308,7 @@ def show_simulator():
         slider_stop_loss.value = config.get('risk_stop', 10)
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
-        select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard') # NEW
+        select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
         select_status.value = config.get('gold_stat', 'Gold')
         slider_earn_rate.value = config.get('gold_earn', 10)
         slider_start_ga.value = config.get('start_ga', 2000)
@@ -366,7 +366,7 @@ def show_simulator():
                 'status_target_pts': SBM_TIERS[select_status.value],
                 'earn_rate': float(slider_earn_rate.value),
                 'use_ratchet': switch_ratchet.value,
-                'ratchet_mode': select_ratchet_mode.value, # PASS TO LOGIC
+                'ratchet_mode': select_ratchet_mode.value, 
                 'use_tax': switch_luxury_tax.value,
                 'use_holiday': switch_holiday.value,
                 'hol_ceil': int(slider_holiday_ceil.value),
@@ -374,6 +374,9 @@ def show_simulator():
                 'safety': int(slider_safety.value),
                 'start_ga': int(slider_start_ga.value),
                 'press_depth': int(slider_press_depth.value),
+                'ratchet_pct': 0.0, 
+                'ratchet_u': 0,     
+                'target_u': 0,      
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
             }
@@ -393,7 +396,7 @@ def show_simulator():
                 shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value,
-                ratchet_mode=select_ratchet_mode.value # PASS TO LOGIC
+                ratchet_mode=select_ratchet_mode.value 
             )
 
             start_ga = config['start_ga']
@@ -706,7 +709,7 @@ def show_simulator():
                              ui.label().bind_text_from(slider_holiday_ceil, 'value', lambda v: f'€{v}')
                              
                              ui.label('Insolvency Floor')
-                             slider_insolvency = ui.slider(min=0, max=5000, step=100, value=1500).props('color=red')
+                             slider_insolvency = ui.slider(min=0, max=5000, step=100, value=1000).props('color=red')
                              ui.label().bind_text_from(slider_insolvency, 'value', lambda v: f'€{v}')
 
                              ui.label('Tax Threshold')
