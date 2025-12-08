@@ -1,12 +1,3 @@
-This error (`'NoneType' object has no attribute 'catastrophic_cap'`) confirms that the function `get_tier_for_ga` is failing to find a tier for your bankroll and is returning `None` (nothing) instead of a valid Tier object. This usually happens when the bankroll gets very high (above the max defined range) and the "fallback" logic at the end of the file is missing or cut off.
-
-We need to make `engine/tier_params.py` robust so it **always** returns a tier, no matter how high or low the bankroll gets.
-
-**Please replace the entire content of `engine/tier_params.py` with this definitive version.**
-
-### `engine/tier_params.py`
-
-```python
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -106,6 +97,3 @@ def get_churn_bet_size(tier_level: int) -> int:
     if tier_level <= 2:
         return 50
     return 100
-```
-
-**Once you have saved this file, reload the simulator page (Refresh your browser) and click RUN STATUS SIM again.** It should now work perfectly.
