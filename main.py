@@ -1,4 +1,4 @@
-from nicegui import ui
+from nicegui import ui, app # Import 'app' so Gunicorn can find it
 from ui.layout import create_layout
 from ui.dashboard import show_dashboard
 from ui.scorecard import show_scorecard
@@ -9,9 +9,6 @@ from ui.session_log import show_session_log
 content_container = None
 
 def render_page(target_func):
-    """
-    Clears the main content area and renders the requested module.
-    """
     if content_container:
         content_container.clear()
         with content_container:
@@ -21,17 +18,10 @@ def render_page(target_func):
                 ui.label(f"Error loading module: {str(e)}").classes('text-red-500')
 
 # 2. Navigation Callbacks
-def nav_dashboard():
-    render_page(show_dashboard)
-
-def nav_cockpit():
-    render_page(show_scorecard)
-
-def nav_simulator():
-    render_page(show_simulator)
-
-def nav_logs():
-    render_page(show_session_log)
+def nav_dashboard(): render_page(show_dashboard)
+def nav_cockpit(): render_page(show_scorecard)
+def nav_simulator(): render_page(show_simulator)
+def nav_logs(): render_page(show_session_log)
 
 # 3. Build the UI
 nav_map = {
@@ -41,7 +31,6 @@ nav_map = {
     'logs': nav_logs
 }
 
-# Create the Shell (Sidebar, Header) and get the Content Container
 content_container = create_layout(nav_map)
 
 # 4. Load Default Page
@@ -49,9 +38,7 @@ with content_container:
     show_dashboard()
 
 # 5. Launch the App
-# 🛑 CRITICAL FIX FOR RENDER:
-# This must NOT be inside an 'if __name__ == "__main__":' block.
-# It must be at the main indentation level (far left) so Gunicorn executes it.
+# CRITICAL: This configures the app but does not block execution when managed by Gunicorn
 ui.run(
     title='Salle Blanche Lab',
     viewport='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
