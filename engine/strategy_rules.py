@@ -46,6 +46,10 @@ class StrategyOverrides:
     gold_churn_threshold: int = 2    # Min units to start churn
     gold_churn_hands: int = 10       # Max hands to churn
 
+    # 5. Financials (Added to fix Error)
+    tax_threshold: float = 12500.0
+    tax_rate: float = 25.0
+
 @dataclass
 class SessionState:
     tier: TierConfig
@@ -253,3 +257,4 @@ class BaccaratStrategist:
             sl_threshold = state.tier.stop_loss * (state.overrides.shoe1_tripwire_pct if state.overrides else 0.5)
             if state.session_pnl < sl_threshold:
                 state.shoe1_tripwire_triggered = True
+```
