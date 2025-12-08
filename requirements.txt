@@ -1,3 +1,6 @@
-nicegui>=1.4.0
+nicegui
 plotly
 pandas
+numpy
+gunicorn
+uvicorn
