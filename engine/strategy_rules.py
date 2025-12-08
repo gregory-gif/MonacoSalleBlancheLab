@@ -118,22 +118,24 @@ class BaccaratStrategist:
         if state.session_pnl <= state.locked_profit or state.session_pnl <= stop_limit:
             return {'bet_amount': 0, 'reason': "STOP LOSS / RATCHET HIT", 'mode': PlayMode.STOPPED}
         
-        # B. Last Shoe Survival Rule (Applies to the final scheduled shoe)
-        # If we are in the LAST shoe of the session (usually 3, but could be 1-5)
+        # B. THE COLOR UP RULE (Hardcap at 20 units)
+        # If we hit +20 units, we leave immediately.
+        if state.session_pnl >= (base_unit * 20):
+             return {'bet_amount': 0, 'reason': "COLOR UP! (+20 Units)", 'mode': PlayMode.STOPPED}
+
+        # C. Last Shoe Survival Rule
         if state.current_shoe == shoes_max:
             s3_trigger = base_unit * (state.overrides.shoe3_survival_trigger if state.overrides else 5)
             s3_drop = base_unit * (state.overrides.shoe3_drop_limit if state.overrides else 1)
             
-            # If we entered Final Shoe with > +5u (or custom), we protect +1u
             if state.shoe3_start_pnl >= s3_trigger:
                 if state.session_pnl <= s3_drop:
                      return {'bet_amount': 0, 'reason': "FINAL SHOE SURVIVAL STOP", 'mode': PlayMode.STOPPED}
-                # Force Flat betting in Survival Mode
-                base_unit = state.tier.base_unit # Ensure no press
+                base_unit = state.tier.base_unit 
                 press_unit = state.tier.base_unit
 
-        # C. Profit Target
-        if state.session_pnl >= profit_target:
+        # D. Standard Profit Target (Disabled if Ratchet is ON)
+        if not state.overrides.ratchet_enabled and state.session_pnl >= profit_target:
             return {'bet_amount': 0, 'reason': "PROFIT TARGET SECURED", 'mode': PlayMode.STOPPED}
 
         # WATCHER (IRON GATE)
@@ -141,19 +143,16 @@ class BaccaratStrategist:
             return {'bet_amount': 0, 'reason': "IRON GATE: Watching", 'mode': PlayMode.WATCHER}
 
         # --- 3. ACTIVE BETTING LOGIC ---
-        
         bet = base_unit
         reason = "Base Bet"
 
-        # A. Tripwire (Shoe 1 Defense)
         if state.shoe1_tripwire_triggered:
             return {'bet_amount': 50, 'reason': "TRIPWIRE: Flat €50", 'mode': PlayMode.ACTIVE}
 
-        # B. Penalty / Cooldown Re-entry
         if state.penalty_cooldown > 0:
             return {'bet_amount': base_unit, 'reason': f"RE-ENTRY ({state.penalty_cooldown})", 'mode': PlayMode.ACTIVE}
 
-        # C. Press Logic (Sniper/Streak)
+        # Press Logic
         max_depth = state.overrides.press_depth if state.overrides else 3
         trigger_wins = state.overrides.press_trigger_wins if state.overrides else 2
         
@@ -170,23 +169,35 @@ class BaccaratStrategist:
         """
         Updates PnL, Streaks, Ratchets, and Modes after a hand result.
         """
-        # 1. Financial Update
         state.session_pnl += amount_won
         state.shoe_pnls[state.current_shoe] += amount_won
         state.hands_played_in_shoe += 1
         state.hands_played_total += 1
         
-        # 2. Ratchet Logic (Lock Profit)
+        # --- NEW LADDER RATCHET LOGIC ---
         if state.session_pnl > state.peak_session_pnl:
             state.peak_session_pnl = state.session_pnl
             
             if state.overrides and state.overrides.ratchet_enabled:
-                if state.peak_session_pnl > 0:
-                    lock_amt = state.peak_session_pnl * state.overrides.ratchet_lock_pct
-                    if lock_amt > state.locked_profit:
-                        state.locked_profit = lock_amt
+                base = state.tier.base_unit
+                current_u = state.peak_session_pnl / base
+                
+                # 1ST LOCK: Reach +8 > Lock +3
+                if current_u >= 8 and current_u < 12:
+                    lock_val = 3 * base
+                    if lock_val > state.locked_profit: state.locked_profit = lock_val
+                
+                # 2ND LOCK: Reach +12 > Lock +5
+                elif current_u >= 12 and current_u < 16:
+                    lock_val = 5 * base
+                    if lock_val > state.locked_profit: state.locked_profit = lock_val
+                    
+                # 3RD LOCK: Reach +16 > Lock +7
+                elif current_u >= 16:
+                    lock_val = 7 * base
+                    if lock_val > state.locked_profit: state.locked_profit = lock_val
 
-        # 3. Watcher / Iron Gate Reset
+        # Watcher Reset
         if state.mode == PlayMode.WATCHER:
             if won:
                 state.mode = PlayMode.ACTIVE
@@ -195,7 +206,7 @@ class BaccaratStrategist:
                 state.penalty_cooldown = state.overrides.iron_gate_cooldown if state.overrides else 3
             return 
 
-        # 4. Streak Tracking
+        # Streak Tracking
         if won:
             state.consecutive_wins += 1
             state.consecutive_losses = 0
@@ -214,7 +225,7 @@ class BaccaratStrategist:
                 state.sniper_state = SniperState.RESET
                 return
 
-        # 5. Shoe 1 Tripwire Trigger
+        # Tripwire
         if not state.overrides and state.current_shoe == 1 and not state.shoe1_tripwire_triggered:
             sl_threshold = state.tier.stop_loss * (state.overrides.shoe1_tripwire_pct if state.overrides else 0.5)
             if state.session_pnl < sl_threshold:
