@@ -64,6 +64,8 @@ class SimulationWorker:
                 press_depth=overrides.press_depth,
                 ratchet_enabled=True,
                 ratchet_mode=overrides.ratchet_mode, # Pass the mode
+                turbo_month_enabled=overrides.turbo_month_enabled, # Pass Turbo
+                turbo_mode=overrides.turbo_mode,
                 ratchet_lock_pct=0.0,
                 shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy
@@ -152,10 +154,36 @@ class SimulationWorker:
         failed_year_one = False
         
         for m in range(total_months):
+            # Check Year Reset
             if m > 0 and m % 12 == 0:
                 current_year_points = 0
                 current_year_pnl = 0.0
 
+            # --- TURBO LOGIC CHECK ---
+            # Is this December (Month 12, 24, 36...)?
+            is_turbo_month = overrides.turbo_month_enabled and ((m + 1) % 12 == 0)
+            
+            # Temporarily modify the overrides for this month
+            current_month_overrides = overrides
+            if is_turbo_month:
+                # Create a copy with the swapped mode
+                current_month_overrides = StrategyOverrides(
+                    iron_gate_limit=overrides.iron_gate_limit,
+                    stop_loss_units=overrides.stop_loss_units,
+                    profit_lock_units=overrides.profit_lock_units,
+                    press_trigger_wins=overrides.press_trigger_wins,
+                    press_depth=overrides.press_depth,
+                    ratchet_enabled=overrides.ratchet_enabled,
+                    ratchet_mode=overrides.turbo_mode, # SWAP HERE
+                    shoes_per_session=overrides.shoes_per_session,
+                    bet_strategy=overrides.bet_strategy,
+                    penalty_box_enabled=overrides.penalty_box_enabled,
+                    turbo_month_enabled=False, # prevent recursion logic issues
+                    tax_threshold=overrides.tax_threshold,
+                    tax_rate=overrides.tax_rate
+                )
+
+            # --- FINANCIALS ---
             tax_thresh = overrides.tax_threshold
             tax_rate = overrides.tax_rate / 100.0
             
@@ -193,7 +221,8 @@ class SimulationWorker:
                     if current_year_pnl <= current_tier.catastrophic_cap:
                         is_penalty = True
 
-                    pnl, vol = SimulationWorker.run_session(current_ga, overrides, tier_map, use_ratchet, penalty_mode=is_penalty)
+                    # Run Session with potential Turbo Override
+                    pnl, vol = SimulationWorker.run_session(current_ga, current_month_overrides, tier_map, use_ratchet, penalty_mode=is_penalty)
                     
                     current_ga += pnl
                     m_play_pnl += pnl
@@ -249,8 +278,8 @@ def show_simulator():
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
             'risk_ratch_mode': select_ratchet_mode.value,
-            # include other eco params if needed for completeness, 
-            # but Cockpit mostly needs Tactics & Risk
+            'turbo_enabled': switch_turbo.value, # NEW
+            'turbo_mode': select_turbo_mode.value # NEW
         }
 
     def save_current_strategy():
@@ -332,6 +361,11 @@ def show_simulator():
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
         select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
+        
+        # New Turbo Load
+        switch_turbo.value = config.get('turbo_enabled', False)
+        select_turbo_mode.value = config.get('turbo_mode', 'Deep Stack')
+
         select_status.value = config.get('gold_stat', 'Gold')
         slider_earn_rate.value = config.get('gold_earn', 10)
         slider_start_ga.value = config.get('start_ga', 2000)
@@ -402,6 +436,8 @@ def show_simulator():
                 'target_u': 0,      
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
+                'turbo_enabled': switch_turbo.value,
+                'turbo_mode': select_turbo_mode.value
             }
             
             total_months = config['years'] * 12
@@ -419,7 +455,9 @@ def show_simulator():
                 shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value,
-                ratchet_mode=select_ratchet_mode.value 
+                ratchet_mode=select_ratchet_mode.value,
+                turbo_month_enabled=switch_turbo.value,
+                turbo_mode=select_turbo_mode.value
             )
 
             start_ga = config['start_ga']
@@ -602,9 +640,14 @@ def show_simulator():
                 lines.append(f"Iron Gate: {overrides.iron_gate_limit} Losses")
                 lines.append(f"Pressing: Trigger {overrides.press_trigger_wins} Wins | Depth {overrides.press_depth}")
                 
-                # UPDATED RATCHET TEXT (MODE AWARE)
+                # UPDATED RATCHET TEXT (MODE AWARE + TURBO)
                 if overrides.ratchet_enabled:
                     lines.append(f"Ratchet: ON (Mode: {overrides.ratchet_mode.upper()})")
+                    if overrides.turbo_month_enabled:
+                        lines.append(f"TURBO MONTH: ENABLED (Month 12 uses {overrides.turbo_mode.upper()})")
+                    else:
+                        lines.append(f"Turbo Month: OFF")
+                        
                     if overrides.ratchet_mode == "Sprint":
                         lines.append(f"   Ladders: +6>3, +9>5, +12>8, +15>STOP")
                     elif overrides.ratchet_mode == "Standard":
@@ -650,7 +693,7 @@ def show_simulator():
                     with ui.row().classes('w-full items-center gap-4'):
                         input_name = ui.input('Save Name').props('dark').classes('flex-grow')
                         ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
-                        # NEW BUTTON
+                        # DEPLOY BUTTON
                         btn_deploy = ui.button('DEPLOY TO LIVE', on_click=deploy_to_cockpit).props('icon=rocket_launch color=purple')
                     
                     with ui.row().classes('w-full items-center gap-4'):
@@ -814,6 +857,13 @@ def show_simulator():
                          with ui.column():
                              ui.label('Mode').classes('text-xs text-yellow-400')
                              select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack'], value='Standard').props('dense options-dense').classes('w-32')
+
+                    # --- TURBO TOGGLE ROW ---
+                    with ui.row().classes('items-center justify-between mt-2'):
+                         switch_turbo = ui.switch('Turbo Month').props('color=purple')
+                         with ui.column():
+                             ui.label('Mode').classes('text-xs text-purple-400')
+                             select_turbo_mode = ui.select(['Sprint', 'Standard', 'Deep Stack'], value='Deep Stack').props('dense options-dense').classes('w-32')
 
                     ui.label('Status Target').classes('text-xs text-yellow-400 mt-2')
                     select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').classes('w-full')
