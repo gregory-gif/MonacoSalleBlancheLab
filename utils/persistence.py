@@ -1,80 +1,147 @@
-import json
 import os
+import json
 from datetime import datetime
+try:
+    from pymongo import MongoClient
+    from pymongo.server_api import ServerApi
+    from pymongo.errors import ConnectionFailure
+except ImportError:
+    MongoClient = None
 
-# File where we store the Director's data AND Strategy Library
-DATA_FILE = 'lab_data.json'
+# --- CONFIGURATION ---
+MONGO_URL = os.environ.get('MONGO_URL')
 
-DEFAULT_PROFILE = {
-    # --- LIVE TRACKER DATA ---
-    "ga": 1700.0,          # Game Account (Real Money)
-    "ytd_pnl": 0.0,        # Year-to-Date Profit/Loss
-    "contributions": 0.0,  # Total Monthly Contributions
-    "luxury_tax_paid": 0.0,
-    "sessions_played": 0,
-    "current_tier": 1,
-    "history": [],         # Log of all real sessions
+# GLOBAL DB CLIENT
+mongo_client = None
+db = None
+
+def get_db():
+    global mongo_client, db
+    if MONGO_URL and not mongo_client:
+        try:
+            # We use the Stable API '1' as recommended by Atlas
+            mongo_client = MongoClient(
+                MONGO_URL, 
+                server_api=ServerApi('1'), 
+                serverSelectionTimeoutMS=5000
+            )
+            # Test the connection immediately
+            mongo_client.admin.command('ping')
+            db = mongo_client['salle_blanche_db']
+            print("✅ CONNECTED TO MONGODB ATLAS")
+        except Exception as e:
+            print(f"⚠️ MONGODB CONNECTION FAILED: {e}")
+            mongo_client = None
     
-    # --- SIMULATOR LIBRARY ---
-    "saved_strategies": {} # Presets for the Simulator
-}
+    return db
+
+# --- PROFILE MANAGEMENT ---
 
 def load_profile():
-    """
-    Loads the profile from disk. If missing or corrupt, returns default.
-    Ensures 'saved_strategies' key always exists.
-    """
-    if not os.path.exists(DATA_FILE):
-        save_profile(DEFAULT_PROFILE)
-        return DEFAULT_PROFILE.copy()
+    """Loads profile from MongoDB or local JSON."""
+    database = get_db()
+    
+    # CLOUD MODE
+    if database is not None:
+        try:
+            profile_coll = database['profile']
+            data = profile_coll.find_one({'_id': 'user_profile'})
+            if not data:
+                default_profile = {
+                    '_id': 'user_profile',
+                    'ga': 1700.0,
+                    'saved_strategies': {}
+                }
+                profile_coll.insert_one(default_profile)
+                return default_profile
+            return data
+        except Exception as e:
+            print(f"Error reading profile from DB: {e}")
+
+    # LOCAL FILE MODE (Fallback)
+    if not os.path.exists('profile.json'):
+        return {'ga': 1700.0, 'saved_strategies': {}}
     
     try:
-        with open(DATA_FILE, 'r') as f:
-            data = json.load(f)
-            
-        # Migration: Ensure new keys exist if loading an old file
-        if "saved_strategies" not in data:
-            data["saved_strategies"] = {}
-        if "history" not in data:
-            data["history"] = []
-            
-        return data
-        
-    except (json.JSONDecodeError, IOError):
-        print(f"⚠️ Warning: Could not read {DATA_FILE}. Returning defaults.")
-        return DEFAULT_PROFILE.copy()
+        with open('profile.json', 'r') as f:
+            return json.load(f)
+    except:
+        return {'ga': 1700.0, 'saved_strategies': {}}
 
 def save_profile(data):
-    """Writes the profile to disk."""
-    try:
-        with open(DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
-    except IOError as e:
-        print(f"❌ Error saving profile: {e}")
+    """Saves profile to MongoDB or local JSON."""
+    database = get_db()
+    
+    # CLOUD MODE
+    if database is not None:
+        try:
+            profile_coll = database['profile']
+            data['_id'] = 'user_profile'
+            profile_coll.replace_one({'_id': 'user_profile'}, data, upsert=True)
+            return
+        except Exception as e:
+            print(f"Error saving profile to DB: {e}")
 
-def log_session_result(start_ga: float, end_ga: float, shoes_played: int):
-    """
-    Updates the Live Profile after a REAL session ends.
-    (Used by dashboard.py, not the simulator)
-    """
-    profile = load_profile()
-    
-    session_pnl = end_ga - start_ga
-    
-    # Update Totals
-    profile["ga"] = end_ga
-    profile["ytd_pnl"] += session_pnl
-    profile["sessions_played"] += 1
-    
-    # Log Entry
-    entry = {
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    # LOCAL FILE MODE
+    with open('profile.json', 'w') as f:
+        json.dump(data, f, indent=4)
+
+# --- SESSION LOGGING ---
+
+def log_session_result(start_ga, end_ga, shoes_played):
+    """Logs a completed session."""
+    log_entry = {
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "start_ga": start_ga,
         "end_ga": end_ga,
-        "pnl": session_pnl,
+        "pnl": end_ga - start_ga,
         "shoes": shoes_played
     }
-    profile["history"].append(entry)
     
-    save_profile(profile)
-    return profile
+    database = get_db()
+    
+    # CLOUD MODE
+    if database is not None:
+        try:
+            logs_coll = database['session_logs']
+            logs_coll.insert_one(log_entry)
+            return
+        except Exception as e:
+            print(f"Error logging session to DB: {e}")
+
+    # LOCAL FILE MODE
+    history = []
+    if os.path.exists('session_logs.json'):
+        try:
+            with open('session_logs.json', 'r') as f:
+                history = json.load(f)
+        except:
+            pass
+    
+    history.append(log_entry)
+    
+    with open('session_logs.json', 'w') as f:
+        json.dump(history, f, indent=4)
+
+def get_session_logs():
+    """Retrieves history."""
+    database = get_db()
+    
+    # CLOUD MODE
+    if database is not None:
+        try:
+            logs_coll = database['session_logs']
+            cursor = logs_coll.find().sort('_id', -1)
+            return list(cursor)
+        except Exception as e:
+            print(f"Error fetching logs from DB: {e}")
+
+    # LOCAL FILE MODE
+    if not os.path.exists('session_logs.json'):
+        return []
+    try:
+        with open('session_logs.json', 'r') as f:
+            data = json.load(f)
+            return data[::-1]
+    except:
+        return []
