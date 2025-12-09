@@ -1,198 +1,289 @@
 from nicegui import ui
-from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode
+from utils.persistence import load_profile, save_profile, log_session_result
 from engine.tier_params import get_tier_for_ga
-from utils.persistence import load_profile, save_profile, log_session_result  # <--- Added save_profile
-
-class Scorecard:
-    def __init__(self):
-        # 1. LOAD PERSISTENCE
-        # -------------------
-        self.profile = load_profile()
-        # Default to 1700 if new profile
-        self.start_ga = self.profile.get('ga', 1700.0) 
-        
-        # 2. AUTO-CALCULATE TIER (Unified Ladder)
-        # ---------------------------------------
-        # We always play the tier matching our Total Game Account (GA)
-        self.tier_config = get_tier_for_ga(self.start_ga)
-        
-        # Initialize Session
-        self.state = SessionState(tier=self.tier_config)
-        self.current_decision = BaccaratStrategist.get_next_decision(self.state)
-        
-        # UI Refs
-        self.hud_bet_label = None
-        self.hud_reason_label = None
-        self.hud_mode_badge = None
-        self.pnl_label = None
-        self.ga_label = None  # Shows Total Bankroll
-        self.shoe_progress = None
-        self.shoe_label = None
-        self.next_shoe_btn = None
-        self.end_session_btn = None
-        
-        self.build_ui()
-        self.refresh_hud()
-
-    def process_result(self, won: bool):
-        if self.state.mode == PlayMode.STOPPED:
-            ui.notify('Session Ended. Please save and exit.', type='warning')
-            return
-
-        bet_amt = self.current_decision['bet_amount']
-        pnl_change = bet_amt if won else -bet_amt
-
-        # Update Engine
-        BaccaratStrategist.update_state_after_hand(self.state, won, pnl_change)
-        
-        # Get Next Prediction
-        self.current_decision = BaccaratStrategist.get_next_decision(self.state)
-        
-        # Refresh Screen
-        self.refresh_hud()
-
-    def advance_shoe(self):
-        """Moves from Shoe 1 -> 2 -> 3 -> End."""
-        if self.state.current_shoe >= 3:
-            self.end_session()
-            return
-
-        # Advance Shoe
-        self.state.current_shoe += 1
-        
-        # Reset Shoe-Specific Counters (but keep PnL)
-        self.state.hands_played_in_shoe = 0
-        self.state.current_press_streak = 0
-        self.state.consecutive_wins = 0
-        self.state.consecutive_losses = 0
-        self.state.penalty_cooldown = 0
-        
-        # Capture Snapshot for Shoe 3 Survival Logic
-        if self.state.current_shoe == 3:
-            self.state.shoe3_start_pnl = self.state.session_pnl
-            ui.notify('Entering Shoe 3: Survival Rules Active', type='info')
-
-        # Get fresh decision for new shoe
-        self.current_decision = BaccaratStrategist.get_next_decision(self.state)
-        self.refresh_hud()
-        ui.notify(f'Started Shoe {self.state.current_shoe}', type='positive')
-
-    def end_session(self):
-        """Saves data to disk and locks the UI."""
-        if self.state.mode == PlayMode.STOPPED and self.end_session_btn.text == 'Saved':
-            return # Already saved
-
-        # Calculate final numbers
-        final_ga = self.start_ga + self.state.session_pnl
-        
-        # 1. Save the Session Log (Receipt)
-        log_session_result(self.start_ga, final_ga, self.state.current_shoe)
-        
-        # 2. Update the Profile (Wallet) <--- THIS WAS MISSING
-        self.profile['ga'] = final_ga
-        save_profile(self.profile)
-        
-        # Update State
-        self.state.mode = PlayMode.STOPPED
-        
-        # Visual Confirmation
-        ui.notify(f'SESSION SAVED. New GA: €{final_ga}', type='positive', close_button=True, timeout=None)
-        self.end_session_btn.set_text('Saved')
-        self.end_session_btn.disable()
-        self.next_shoe_btn.disable()
-        self.refresh_hud()
-
-    def refresh_hud(self):
-        """Updates all visual elements."""
-        decision = self.current_decision
-        
-        # 1. Update Decision HUD
-        self.hud_bet_label.set_text(f"€{decision['bet_amount']}")
-        self.hud_reason_label.set_text(decision['reason'])
-        
-        # 2. Update Mode Badge
-        mode = self.state.mode
-        if mode == PlayMode.WATCHER:
-            self.hud_mode_badge.props('color=red icon=visibility label="IRON GATE: WATCHING"')
-        elif mode == PlayMode.STOPPED:
-            self.hud_mode_badge.props('color=grey icon=stop label="SESSION ENDED"')
-            self.hud_bet_label.set_text("STOP")
-        elif decision['bet_amount'] > self.state.tier.base_unit:
-            self.hud_mode_badge.props('color=orange icon=local_fire_department label="SNIPER: FIRE"')
-        else:
-            self.hud_mode_badge.props('color=green icon=verified_user label="SNIPER: ACTIVE"')
-
-        # 3. Update Stats
-        pnl = self.state.session_pnl
-        current_ga = self.start_ga + pnl
-        
-        color = "text-green-400" if pnl >= 0 else "text-red-400"
-        self.pnl_label.set_text(f"€{pnl:+}")
-        self.pnl_label.classes(replace=color)
-        
-        self.ga_label.set_text(f"GA: €{current_ga:,.0f}")
-        
-        self.shoe_progress.set_value(self.state.hands_played_in_shoe / 80.0)
-        self.shoe_label.set_text(f"{self.state.current_shoe} / 3")
-        
-        # Button States
-        if self.state.current_shoe < 3 and mode != PlayMode.STOPPED:
-             self.next_shoe_btn.enable()
-             self.next_shoe_btn.set_text('Next Shoe')
-        elif self.state.current_shoe == 3 and mode != PlayMode.STOPPED:
-             self.next_shoe_btn.set_text('Finish Shoe 3')
-        
-        if mode == PlayMode.STOPPED:
-             self.next_shoe_btn.disable()
-
-    def build_ui(self):
-        with ui.column().classes('w-full max-w-2xl mx-auto gap-6'):
-            
-            # --- UPPER HUD ---
-            with ui.card().classes('w-full bg-slate-900 border border-slate-700 p-6 items-center text-center relative'):
-                # Tier Badge
-                ui.chip(f'TIER {self.tier_config.level}', icon='layers').classes('absolute top-4 right-4').props('color=slate-700')
-                
-                ui.label('NEXT BET').classes('text-slate-500 text-xs font-bold tracking-widest mb-1')
-                self.hud_bet_label = ui.label('€50').classes('text-6xl font-black text-white mb-2')
-                self.hud_reason_label = ui.label('Waiting for Trigger').classes('text-slate-400 italic text-sm mb-4')
-                self.hud_mode_badge = ui.chip('ACTIVE', icon='verified_user').props('color=green text-color=white')
-
-            # --- CONTROLS ---
-            with ui.row().classes('w-full gap-4'):
-                with ui.button(on_click=lambda: self.process_result(True)).classes('flex-1 h-24 text-2xl font-bold bg-green-600 hover:bg-green-500 shadow-lg'):
-                    with ui.column().classes('items-center'):
-                        ui.label('WIN').classes('leading-none')
-                        ui.label('Banker').classes('text-xs font-normal opacity-80')
-
-                with ui.button(on_click=lambda: self.process_result(False)).classes('flex-1 h-24 text-2xl font-bold bg-red-600 hover:bg-red-500 shadow-lg'):
-                    with ui.column().classes('items-center'):
-                        ui.label('LOSS').classes('leading-none')
-                        ui.label('Player/Tie').classes('text-xs font-normal opacity-80')
-
-            # --- STATS ROW ---
-            with ui.grid(columns=3).classes('w-full gap-4'):
-                with ui.card().classes('bg-slate-800 p-3 items-center'):
-                    ui.label('SHOE').classes('text-xs text-slate-500')
-                    self.shoe_label = ui.label('1 / 3').classes('text-xl font-bold text-white')
-                
-                with ui.card().classes('bg-slate-800 p-3 items-center'):
-                    ui.label('SESSION PnL').classes('text-xs text-slate-500')
-                    self.pnl_label = ui.label('€0').classes('text-xl font-bold text-white')
-
-                with ui.card().classes('bg-slate-800 p-3 items-center'):
-                    ui.label('TOTAL GA').classes('text-xs text-slate-500')
-                    self.ga_label = ui.label('€1,700').classes('text-xl font-bold text-blue-400')
-
-            with ui.card().classes('bg-slate-800 p-2 items-center w-full'):
-                 self.shoe_progress = ui.linear_progress(value=0, show_value=False).props('color=blue track-color=grey-8').classes('w-full')
-
-            # --- SESSION TOOLS ---
-            with ui.expansion('Session Tools', icon='settings').classes('w-full bg-slate-800 text-slate-300'):
-                with ui.row().classes('p-4 w-full justify-between'):
-                    self.next_shoe_btn = ui.button('Next Shoe', on_click=self.advance_shoe, color='blue', icon='skip_next').props('outline')
-                    self.end_session_btn = ui.button('End & Save', on_click=self.end_session, color='red', icon='save').props('outline')
 
 def show_scorecard():
-    # Helper to clear content and show this view
-    Scorecard()
+    # 1. Load Data
+    profile = load_profile()
+    db_ga = profile.get('ga', 1700.0)
+    
+    # State Variables
+    start_ga = db_ga
+    end_ga = db_ga
+    shoes_played = 3
+    
+    # 2. Helper to Calculate Strategy Numbers
+    def get_strategy_numbers(bankroll):
+        tier = get_tier_for_ga(bankroll)
+        u = tier.base_unit
+        
+        return {
+            'unit': u,
+            'stop_loss': bankroll - (10 * u),
+            'ladder': [
+                {'trigger_u': 8, 'lock_u': 3, 'trig_eur': bankroll + (8*u), 'lock_eur': bankroll + (3*u)},
+                {'trigger_u': 12, 'lock_u': 5, 'trig_eur': bankroll + (12*u), 'lock_eur': bankroll + (5*u)},
+                {'trigger_u': 16, 'lock_u': 7, 'trig_eur': bankroll + (16*u), 'lock_eur': bankroll + (7*u)},
+                {'trigger_u': 20, 'lock_u': 'MAX', 'trig_eur': bankroll + (20*u), 'lock_eur': 'COLOR UP'}
+            ]
+        }
+
+    # 3. UI Layout
+    with ui.column().classes('w-full max-w-3xl mx-auto gap-6 p-4'):
+        
+        # --- SECTION A: PRE-FLIGHT BRIEFING ---
+        with ui.card().classes('w-full bg-slate-900 border border-slate-700'):
+            with ui.row().classes('w-full items-center justify-between px-4 py-2 border-b border-slate-800'):
+                ui.label('MISSION BRIEFING').classes('text-sm font-bold text-blue-400 tracking-widest')
+                ui.icon('flight_takeoff', color='blue').classes('text-xl')
+
+            with ui.column().classes('p-6 w-full gap-6'):
+                # 1. Buy-In Input
+                ui.label('1. Confirm Start Bankroll').classes('text-slate-500 text-xs font-bold uppercase')
+                
+                # We need a container to refresh the strategy card when input changes
+                strategy_container = ui.column().classes('w-full gap-4')
+
+                def update_strategy_card(e):
+                    try:
+                        new_val = float(e.value)
+                        render_strategy_card(new_val)
+                    except: pass
+
+                input_start = ui.number(
+                    value=start_ga, 
+                    format='%.0f', 
+                    on_change=update_strategy_card
+                ).props('outlined dark prefix="€" input-class="text-2xl font-bold text-white"').classes('w-full')
+
+                # 2. The Strategy Card (Refreshes dynamically)
+                def render_strategy_card(bankroll):
+                    strategy_container.clear()
+                    data = get_strategy_numbers(bankroll)
+                    u = data['unit']
+                    
+                    with strategy_container:
+                        ui.separator().classes('bg-slate-800')
+                        
+                        # Base Unit & Stop Loss Row
+                        with ui.grid(columns=2).classes('w-full gap-4'):
+                            with ui.card().classes('bg-slate-800 p-4 items-center text-center'):
+                                ui.label('BASE BET').classes('text-xs text-slate-500 font-bold')
+                                ui.label(f'€{u}').classes('text-3xl font-black text-white')
+                            
+                            with ui.card().classes('bg-red-900/30 border border-red-900 p-4 items-center text-center'):
+                                ui.label('STOP LOSS (-10u)').classes('text-xs text-red-400 font-bold')
+                                ui.label(f'€{data["stop_loss"]:,.0f}').classes('text-3xl font-black text-red-500')
+
+                        # Rules Text
+                        with ui.expansion('Engagement Rules', icon='gavel').classes('w-full bg-slate-800 text-slate-400 text-sm'):
+                            with ui.column().classes('p-4 gap-2'):
+                                ui.markdown('**1. Betting:** Banker Only (or Player Only). Stick to it.')
+                                ui.markdown('**2. Pressing:** After 2 Wins, press +1 Unit.')
+                                ui.markdown('**3. Iron Gate:** If 3 Losses in a row -> **PAUSE**. Wait for 1 Virtual Win, then restart.')
+
+                        # Ratchet Ladder Visual
+                        ui.label('RATCHET LADDER (Mental Checkpoints)').classes('text-xs text-yellow-500 font-bold uppercase mt-2')
+                        
+                        for step in data['ladder']:
+                            with ui.row().classes('w-full justify-between items-center bg-slate-800 p-3 rounded'):
+                                # Trigger (Left)
+                                with ui.column().classes('gap-0'):
+                                    ui.label(f"HIT: €{step['trig_eur']:,.0f}").classes('text-lg font-bold text-green-400')
+                                    ui.label(f"(+{step['trigger_u']} Units)").classes('text-xs text-green-700')
+                                
+                                ui.icon('arrow_forward', color='grey')
+                                
+                                # Lock (Right)
+                                with ui.column().classes('gap-0 items-end'):
+                                    lock_val = step['lock_eur']
+                                    if isinstance(lock_val, (int, float)):
+                                        ui.label(f"LOCK: €{lock_val:,.0f}").classes('text-lg font-bold text-yellow-400')
+                                    else:
+                                        ui.label(f"{lock_val}").classes('text-lg font-black text-yellow-400')
+                                    
+                                    lock_u = step['lock_u']
+                                    if isinstance(lock_u, (int, float)):
+                                        ui.label(f"(+{lock_u} Units)").classes('text-xs text-yellow-700')
+
+                # Initial Render
+                render_strategy_card(start_ga)
+
+        # --- SECTION B: POST-FLIGHT DEBRIEF ---
+        with ui.card().classes('w-full bg-slate-900 border border-slate-700 mt-4'):
+            with ui.row().classes('w-full items-center justify-between px-4 py-2 border-b border-slate-800'):
+                ui.label('DEBRIEF LOG').classes('text-sm font-bold text-green-400 tracking-widest')
+                ui.icon('assignment', color='green').classes('text-xl')
+
+            with ui.column().classes('p-6 w-full gap-6'):
+                
+                # 1. End Balance
+                ui.label('Final Chip Count').classes('text-slate-500 text-xs font-bold uppercase')
+                input_end = ui.number(value=start_ga, format='%.0f').props('outlined dark prefix="€" input-class="text-3xl font-black text-green-400"').classes('w-full')
+                
+                # 2. Volume
+                ui.label('Volume (Shoes Played)').classes('text-slate-500 text-xs font-bold uppercase')
+                slider_shoes = ui.slider(min=1, max=10, value=3).props('label-always color=blue')
+                
+                # 3. Submit
+                def submit_log():
+                    s_val = input_start.value
+                    e_val = input_end.value
+                    shoes = slider_shoes.value
+                    
+                    if s_val is not None and e_val is not None:
+                        # 1. Save History
+                        log_session_result(float(s_val), float(e_val), int(shoes))
+                        
+                        # 2. Update Wallet Profile
+                        profile['ga'] = float(e_val)
+                        save_profile(profile)
+                        
+                        ui.notify(f'Session Logged! New GA: €{e_val:,.0f}', type='positive')
+                        ui.open('/') # Go back to dashboard
+
+                ui.button('COMPLETE MISSION', on_click=submit_log).classes('w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-500 shadow-lg mt-4')from nicegui import ui
+from utils.persistence import load_profile, save_profile, log_session_result
+from engine.tier_params import get_tier_for_ga
+
+def show_scorecard():
+    # 1. Load Data
+    profile = load_profile()
+    db_ga = profile.get('ga', 1700.0)
+    
+    # State Variables
+    start_ga = db_ga
+    end_ga = db_ga
+    shoes_played = 3
+    
+    # 2. Helper to Calculate Strategy Numbers
+    def get_strategy_numbers(bankroll):
+        tier = get_tier_for_ga(bankroll)
+        u = tier.base_unit
+        
+        return {
+            'unit': u,
+            'stop_loss': bankroll - (10 * u),
+            'ladder': [
+                {'trigger_u': 8, 'lock_u': 3, 'trig_eur': bankroll + (8*u), 'lock_eur': bankroll + (3*u)},
+                {'trigger_u': 12, 'lock_u': 5, 'trig_eur': bankroll + (12*u), 'lock_eur': bankroll + (5*u)},
+                {'trigger_u': 16, 'lock_u': 7, 'trig_eur': bankroll + (16*u), 'lock_eur': bankroll + (7*u)},
+                {'trigger_u': 20, 'lock_u': 'MAX', 'trig_eur': bankroll + (20*u), 'lock_eur': 'COLOR UP'}
+            ]
+        }
+
+    # 3. UI Layout
+    with ui.column().classes('w-full max-w-3xl mx-auto gap-6 p-4'):
+        
+        # --- SECTION A: PRE-FLIGHT BRIEFING ---
+        with ui.card().classes('w-full bg-slate-900 border border-slate-700'):
+            with ui.row().classes('w-full items-center justify-between px-4 py-2 border-b border-slate-800'):
+                ui.label('MISSION BRIEFING').classes('text-sm font-bold text-blue-400 tracking-widest')
+                ui.icon('flight_takeoff', color='blue').classes('text-xl')
+
+            with ui.column().classes('p-6 w-full gap-6'):
+                # 1. Buy-In Input
+                ui.label('1. Confirm Start Bankroll').classes('text-slate-500 text-xs font-bold uppercase')
+                
+                # We need a container to refresh the strategy card when input changes
+                strategy_container = ui.column().classes('w-full gap-4')
+
+                def update_strategy_card(e):
+                    try:
+                        new_val = float(e.value)
+                        render_strategy_card(new_val)
+                    except: pass
+
+                input_start = ui.number(
+                    value=start_ga, 
+                    format='%.0f', 
+                    on_change=update_strategy_card
+                ).props('outlined dark prefix="€" input-class="text-2xl font-bold text-white"').classes('w-full')
+
+                # 2. The Strategy Card (Refreshes dynamically)
+                def render_strategy_card(bankroll):
+                    strategy_container.clear()
+                    data = get_strategy_numbers(bankroll)
+                    u = data['unit']
+                    
+                    with strategy_container:
+                        ui.separator().classes('bg-slate-800')
+                        
+                        # Base Unit & Stop Loss Row
+                        with ui.grid(columns=2).classes('w-full gap-4'):
+                            with ui.card().classes('bg-slate-800 p-4 items-center text-center'):
+                                ui.label('BASE BET').classes('text-xs text-slate-500 font-bold')
+                                ui.label(f'€{u}').classes('text-3xl font-black text-white')
+                            
+                            with ui.card().classes('bg-red-900/30 border border-red-900 p-4 items-center text-center'):
+                                ui.label('STOP LOSS (-10u)').classes('text-xs text-red-400 font-bold')
+                                ui.label(f'€{data["stop_loss"]:,.0f}').classes('text-3xl font-black text-red-500')
+
+                        # Rules Text
+                        with ui.expansion('Engagement Rules', icon='gavel').classes('w-full bg-slate-800 text-slate-400 text-sm'):
+                            with ui.column().classes('p-4 gap-2'):
+                                ui.markdown('**1. Betting:** Banker Only (or Player Only). Stick to it.')
+                                ui.markdown('**2. Pressing:** After 2 Wins, press +1 Unit.')
+                                ui.markdown('**3. Iron Gate:** If 3 Losses in a row -> **PAUSE**. Wait for 1 Virtual Win, then restart.')
+
+                        # Ratchet Ladder Visual
+                        ui.label('RATCHET LADDER (Mental Checkpoints)').classes('text-xs text-yellow-500 font-bold uppercase mt-2')
+                        
+                        for step in data['ladder']:
+                            with ui.row().classes('w-full justify-between items-center bg-slate-800 p-3 rounded'):
+                                # Trigger (Left)
+                                with ui.column().classes('gap-0'):
+                                    ui.label(f"HIT: €{step['trig_eur']:,.0f}").classes('text-lg font-bold text-green-400')
+                                    ui.label(f"(+{step['trigger_u']} Units)").classes('text-xs text-green-700')
+                                
+                                ui.icon('arrow_forward', color='grey')
+                                
+                                # Lock (Right)
+                                with ui.column().classes('gap-0 items-end'):
+                                    lock_val = step['lock_eur']
+                                    if isinstance(lock_val, (int, float)):
+                                        ui.label(f"LOCK: €{lock_val:,.0f}").classes('text-lg font-bold text-yellow-400')
+                                    else:
+                                        ui.label(f"{lock_val}").classes('text-lg font-black text-yellow-400')
+                                    
+                                    lock_u = step['lock_u']
+                                    if isinstance(lock_u, (int, float)):
+                                        ui.label(f"(+{lock_u} Units)").classes('text-xs text-yellow-700')
+
+                # Initial Render
+                render_strategy_card(start_ga)
+
+        # --- SECTION B: POST-FLIGHT DEBRIEF ---
+        with ui.card().classes('w-full bg-slate-900 border border-slate-700 mt-4'):
+            with ui.row().classes('w-full items-center justify-between px-4 py-2 border-b border-slate-800'):
+                ui.label('DEBRIEF LOG').classes('text-sm font-bold text-green-400 tracking-widest')
+                ui.icon('assignment', color='green').classes('text-xl')
+
+            with ui.column().classes('p-6 w-full gap-6'):
+                
+                # 1. End Balance
+                ui.label('Final Chip Count').classes('text-slate-500 text-xs font-bold uppercase')
+                input_end = ui.number(value=start_ga, format='%.0f').props('outlined dark prefix="€" input-class="text-3xl font-black text-green-400"').classes('w-full')
+                
+                # 2. Volume
+                ui.label('Volume (Shoes Played)').classes('text-slate-500 text-xs font-bold uppercase')
+                slider_shoes = ui.slider(min=1, max=10, value=3).props('label-always color=blue')
+                
+                # 3. Submit
+                def submit_log():
+                    s_val = input_start.value
+                    e_val = input_end.value
+                    shoes = slider_shoes.value
+                    
+                    if s_val is not None and e_val is not None:
+                        # 1. Save History
+                        log_session_result(float(s_val), float(e_val), int(shoes))
+                        
+                        # 2. Update Wallet Profile
+                        profile['ga'] = float(e_val)
+                        save_profile(profile)
+                        
+                        ui.notify(f'Session Logged! New GA: €{e_val:,.0f}', type='positive')
+                        ui.open('/') # Go back to dashboard
+
+                ui.button('COMPLETE MISSION', on_click=submit_log).classes('w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-500 shadow-lg mt-4')
