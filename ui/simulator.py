@@ -8,6 +8,7 @@ import json
 
 # Internal Imports
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
+# CRITICAL FIX: Removed TIER_MAP from this import line
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
 
@@ -268,7 +269,7 @@ def show_simulator():
             'tac_shoes': slider_shoes.value,
             'tac_bet': select_bet_strat.value,
             'tac_penalty': switch_penalty.value,
-            'tac_cap_tier2': switch_cap_tier2.value, # NEW
+            'tac_cap_tier2': switch_cap_tier2.value,
             'risk_stop': slider_stop_loss.value,
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
@@ -310,7 +311,7 @@ def show_simulator():
         slider_shoes.value = config.get('tac_shoes', 3)
         select_bet_strat.value = config.get('tac_bet', 'Banker')
         switch_penalty.value = config.get('tac_penalty', True)
-        switch_cap_tier2.value = config.get('tac_cap_tier2', False) # NEW
+        switch_cap_tier2.value = config.get('tac_cap_tier2', False)
         slider_stop_loss.value = config.get('risk_stop', 10)
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
@@ -335,7 +336,6 @@ def show_simulator():
 
     def update_ladder_preview():
         factor = slider_safety.value
-        # Check if Tier 2 Cap is active
         max_t = 2 if switch_cap_tier2.value else 0
         t_map = generate_tier_map(factor, max_tier_cap=max_t)
         
@@ -385,7 +385,7 @@ def show_simulator():
                 'press_depth': int(slider_press_depth.value),
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
-                'cap_tier2': switch_cap_tier2.value # NEW
+                'cap_tier2': switch_cap_tier2.value
             }
             
             total_months = config['years'] * 12
@@ -422,7 +422,7 @@ def show_simulator():
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
                             config['hol_ceil'], config['insolvency'],
-                            config['cap_tier2'] # NEW
+                            config['cap_tier2'] 
                         )
                         batch_data.append(res)
                     return batch_data
