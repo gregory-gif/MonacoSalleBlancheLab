@@ -1,7 +1,7 @@
 from nicegui import ui
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode
 from engine.tier_params import get_tier_for_ga
-from utils.persistence import load_profile, log_session_result
+from utils.persistence import load_profile, save_profile, log_session_result  # <--- Added save_profile
 
 class Scorecard:
     def __init__(self):
@@ -85,12 +85,15 @@ class Scorecard:
         # Calculate final numbers
         final_ga = self.start_ga + self.state.session_pnl
         
-        # Save to Persistence
+        # 1. Save the Session Log (Receipt)
         log_session_result(self.start_ga, final_ga, self.state.current_shoe)
+        
+        # 2. Update the Profile (Wallet) <--- THIS WAS MISSING
+        self.profile['ga'] = final_ga
+        save_profile(self.profile)
         
         # Update State
         self.state.mode = PlayMode.STOPPED
-        self.profile['ga'] = final_ga # Update local ref for display
         
         # Visual Confirmation
         ui.notify(f'SESSION SAVED. New GA: €{final_ga}', type='positive', close_button=True, timeout=None)
@@ -192,5 +195,4 @@ class Scorecard:
 
 def show_scorecard():
     # Helper to clear content and show this view
-    # This was missing in your error log!
     Scorecard()
