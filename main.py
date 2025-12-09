@@ -2,7 +2,7 @@ import os
 from nicegui import ui
 from ui.layout import create_layout
 from ui.dashboard import show_dashboard
-from ui.scorecard import show_scorecard  # <--- Updated Import
+from ui.scorecard import show_scorecard
 from ui.simulator import show_simulator
 from ui.session_log import show_session_log
 
@@ -20,15 +20,17 @@ def render_page(target_func):
 
 # 2. Navigation Callbacks
 def nav_dashboard(): render_page(show_dashboard)
-def nav_cockpit(): render_page(show_scorecard)  # <--- Updated Call
-def nav_simulator(): render_page(show_simulator)
+def nav_simulator(): render_page(show_simulator) # Moved Up
+def nav_cockpit(): render_page(show_scorecard)   # Moved Down
 def nav_logs(): render_page(show_session_log)
 
 # 3. Build the UI
+# The order here determines the order in the sidebar if generated dynamically,
+# but mostly it maps the keys.
 nav_map = {
     'dashboard': nav_dashboard,
-    'cockpit': nav_cockpit,
-    'simulator': nav_simulator,
+    'simulator': nav_simulator, # Reordered
+    'cockpit': nav_cockpit,     # Reordered
     'logs': nav_logs
 }
 
