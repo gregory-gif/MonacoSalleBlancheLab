@@ -41,6 +41,12 @@ class StrategyOverrides:
     # 3. Ratchet & Survival
     ratchet_enabled: bool = False
     ratchet_mode: str = "Standard" # 'Sprint', 'Standard', 'Deep Stack'
+    
+    # --- NEW TURBO LOGIC ---
+    turbo_month_enabled: bool = False
+    turbo_mode: str = "Deep Stack" # Mode to switch to in Month 12
+    # -----------------------
+
     ratchet_lock_pct: float = 0.50   
     shoe3_survival_trigger: int = 5  
     shoe3_drop_limit: int = 1        
