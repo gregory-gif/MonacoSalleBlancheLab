@@ -2,10 +2,6 @@ from nicegui import ui
 from utils.persistence import load_profile, save_profile, log_session_result
 from engine.tier_params import get_tier_for_ga
 
-# Dummy class to satisfy legacy imports if needed, 
-# though main.py usually imports the function 'show_scorecard'.
-# If main.py imports 'Scorecard', we can redirect it.
-
 def show_scorecard():
     # 1. Load Data
     profile = load_profile()
@@ -65,4 +61,55 @@ def show_scorecard():
                                 ui.label('BASE BET').classes('text-xs text-slate-500 font-bold')
                                 ui.label(f'€{u}').classes('text-3xl font-black text-white')
                             
-                            with ui.card().classes('bg-red-900/3
+                            with ui.card().classes('bg-red-900/30 border border-red-900 p-4 items-center text-center'):
+                                ui.label('STOP LOSS (-10u)').classes('text-xs text-red-400 font-bold')
+                                ui.label(f'€{data["stop_loss"]:,.0f}').classes('text-3xl font-black text-red-500')
+
+                        # Rules Text
+                        with ui.expansion('Engagement Rules', icon='gavel').classes('w-full bg-slate-800 text-slate-400 text-sm'):
+                            with ui.column().classes('p-4 gap-2'):
+                                ui.markdown('**1. Betting:** Banker Only (or Player Only). Stick to it.')
+                                ui.markdown('**2. Pressing:** After 2 Wins, press +1 Unit.')
+                                ui.markdown('**3. Iron Gate:** If 3 Losses in a row -> **PAUSE**. Wait for 1 Virtual Win, then restart.')
+
+                        # Ratchet Ladder Visual
+                        ui.label('RATCHET LADDER (Mental Checkpoints)').classes('text-xs text-yellow-500 font-bold uppercase mt-2')
+                        
+                        for step in data['ladder']:
+                            with ui.row().classes('w-full justify-between items-center bg-slate-800 p-3 rounded'):
+                                # Trigger (Left)
+                                with ui.column().classes('gap-0'):
+                                    ui.label(f"HIT: €{step['trig_eur']:,.0f}").classes('text-lg font-bold text-green-400')
+                                    ui.label(f"(+{step['trigger_u']} Units)").classes('text-xs text-green-700')
+                                
+                                ui.icon('arrow_forward', color='grey')
+                                
+                                # Lock (Right)
+                                with ui.column().classes('gap-0 items-end'):
+                                    lock_val = step['lock_eur']
+                                    if isinstance(lock_val, (int, float)):
+                                        ui.label(f"LOCK: €{lock_val:,.0f}").classes('text-lg font-bold text-yellow-400')
+                                    else:
+                                        ui.label(f"{lock_val}").classes('text-lg font-black text-yellow-400')
+                                    
+                                    lock_u = step['lock_u']
+                                    if isinstance(lock_u, (int, float)):
+                                        ui.label(f"(+{lock_u} Units)").classes('text-xs text-yellow-700')
+
+                def update_strategy_card(e):
+                    try:
+                        new_val = float(e.value)
+                        state['start_ga'] = new_val # Update state
+                        render_strategy_card(new_val)
+                    except: pass
+
+                input_start = ui.number(
+                    value=db_ga, 
+                    format='%.0f', 
+                    on_change=update_strategy_card
+                ).props('outlined dark prefix="€" input-class="text-2xl font-bold text-white"').classes('w-full')
+
+                # Initial Render
+                render_strategy_card(db_ga)
+
+        # --- SECTION B: POST
