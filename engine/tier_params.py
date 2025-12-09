@@ -1,99 +1,82 @@
 from dataclasses import dataclass
-from typing import Dict, Optional
 
-@dataclass(frozen=True)
+@dataclass
 class TierConfig:
     level: int
-    min_ga: int
-    max_ga: int
-    base_unit: int
-    press_unit: int
-    stop_loss: int
-    profit_lock: int
-    catastrophic_cap: int
+    min_ga: float
+    max_ga: float
+    base_unit: float
+    press_unit: float
+    stop_loss: float
+    profit_lock: float
+    catastrophic_cap: float
 
-def generate_tier_map(safety_factor: int = 20) -> Dict[int, TierConfig]:
+# Base Params
+BASE_BET_T1 = 50.0
+
+def generate_tier_map(safety_factor: int, max_tier_cap: int = 0) -> dict:
     """
-    Generates the Tier Ladder based on Risk Tolerance.
-    safety_factor: How many Base Units you need to play this tier.
-    Standard Doctrine = 20. Conservative = 40.
+    Generates the Tier Map based on Safety Factor (Buffer).
+    max_tier_cap: If > 0, stops generating tiers at this level (e.g. 2 = Max Tier 2).
     """
+    tiers = {}
+    current_base = BASE_BET_T1
     
-    # Base Units: Tier 1=50, Tier 2=100, Tier 3=150, Tier 4=200, Tier 5=250
-    specs = [
-        (1, 50, 100),
-        (2, 100, 150),
-        (3, 150, 200),
-        (4, 200, 300),
-        (5, 250, 375)
-    ]
+    # We define up to Tier 6 standard, but the loop can handle logic
+    # Tiers: 1=50, 2=100, 3=200, 4=500, 5=1000, 6=2000
+    multipliers = [1, 2, 4, 10, 20, 40] 
     
-    tier_map = {}
-    
-    for i, (level, base, press) in enumerate(specs):
-        if level == 1:
-            # Floor of 1500 or calculated risk, whichever is higher
-            start_ga = max(1500, base * safety_factor)
-        else:
-            start_ga = base * safety_factor
-            
-        # Stop Loss: ~10 units | Profit: +6 units
-        stop = -(base * 10) 
-        profit = base * 6 
+    for i, mult in enumerate(multipliers):
+        level = i + 1
         
-        # Cap: ~3.5x Stop Loss (This is a negative number, e.g., -1750)
-        cat_cap = stop * 3.5
-        
-        # Calculate End GA (Start of next tier - 1)
-        if i < len(specs) - 1:
-            next_base = specs[i+1][1]
-            next_start = next_base * safety_factor
-            end_ga = next_start - 1
-        else:
-            # Huge number to catch everything above Tier 5
-            end_ga = 999_999_999_999
+        # If a cap is set and we passed it, stop.
+        if max_tier_cap > 0 and level > max_tier_cap:
+            break
             
-        tier_map[level] = TierConfig(
+        base = BASE_BET_T1 * mult
+        
+        # Min GA = Base * Safety Factor
+        min_ga = base * safety_factor
+        
+        # Logic to determine Max GA for this tier (it's the Min GA of the next tier)
+        # If this is the LAST tier (either by natural end or CAP), Max GA is infinity
+        is_last_tier = (i == len(multipliers) - 1) or (max_tier_cap > 0 and level == max_tier_cap)
+        
+        if is_last_tier:
+            max_ga = float('inf')
+        else:
+            next_base = BASE_BET_T1 * multipliers[i+1]
+            max_ga = next_base * safety_factor
+            
+        tiers[level] = TierConfig(
             level=level,
-            min_ga=int(start_ga),
-            max_ga=int(end_ga),
+            min_ga=min_ga,
+            max_ga=max_ga,
             base_unit=base,
-            press_unit=press,
-            stop_loss=stop,
-            profit_lock=profit,
-            catastrophic_cap=int(cat_cap)
+            press_unit=base, # Standard Press is 1 unit
+            stop_loss=-(base * 10),
+            profit_lock=base * 6, # Default, overriden by overrides
+            catastrophic_cap=-(base * 20)
         )
         
-    return tier_map
+    return tiers
 
-# Default Map for imports
-TIER_MAP = generate_tier_map(safety_factor=20)
-
-def get_tier_for_ga(ga: float, tier_map: Optional[Dict[int, TierConfig]] = None) -> TierConfig:
+def get_tier_for_ga(current_ga: float, tier_map: dict = None) -> TierConfig:
     """
-    Finds the correct tier for a given Game Account balance.
-    SAFEGUARDED: Will never return None.
+    Returns the appropriate TierConfig for a given Bankroll.
     """
     if tier_map is None:
-        tier_map = TIER_MAP
-
-    # 1. Normal Lookup
-    for tier_level, config in tier_map.items():
-        if config.min_ga <= ga <= config.max_ga:
-            return config
-            
-    # 2. Low Bankroll Fallback (Below Tier 1)
-    # If we are below the minimum, return Tier 1
-    lowest_min = tier_map[1].min_ga
-    if ga < lowest_min:
-        return tier_map[1]
+        # Default safety of 25 if not provided (shouldn't happen in sim)
+        tier_map = generate_tier_map(25)
+        
+    # Find the highest tier where current_ga >= min_ga
+    selected_tier = tier_map[1] # Default to Tier 1
     
-    # 3. High Bankroll Fallback (Above Tier 5)
-    # If we exceeded the max (unlikely with the huge number above, but safe), return highest tier
-    return tier_map[5]
-
-def get_churn_bet_size(tier_level: int) -> int:
-    """Returns the bet size for Gold Churn mode."""
-    if tier_level <= 2:
-        return 50
-    return 100
+    for level in sorted(tier_map.keys()):
+        t = tier_map[level]
+        if current_ga >= t.min_ga:
+            selected_tier = t
+        else:
+            break
+            
+    return selected_tier
