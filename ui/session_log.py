@@ -1,62 +1,45 @@
 from nicegui import ui
-from utils.persistence import load_profile
+from utils.persistence import get_session_logs, delete_session_log
 
 def show_session_log():
-    # 1. Load Data
-    profile = load_profile()
-    history = profile.get('history', [])
+    # 1. Fetch Data
+    logs = get_session_logs()
     
-    # 2. Reverse history to show newest first
-    # We add an ID for the table
-    rows = []
-    for i, entry in enumerate(reversed(history)):
-        rows.append({
-            'id': len(history) - i,
-            'date': entry.get('date', 'N/A'),
-            'start': f"€{entry.get('start_ga', 0):.0f}",
-            'end': f"€{entry.get('end_ga', 0):.0f}",
-            'pnl': entry.get('pnl', 0),
-            'shoes': entry.get('shoes', 0)
-        })
+    # 2. UI Layout
+    with ui.column().classes('w-full max-w-4xl mx-auto gap-4 p-4'):
+        ui.label('SESSION HISTORY').classes('text-2xl font-light text-slate-300 mb-4')
+        
+        if not logs:
+            ui.label('No sessions recorded yet.').classes('text-slate-500 italic')
+            return
 
-    # 3. UI Layout
-    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
-        ui.label('OFFICIAL SESSION LOG').classes('text-2xl font-light text-slate-300')
+        # 3. Create Rows
+        # We use a simple grid card for each entry instead of a complex data table for mobile friendliness
+        for entry in logs:
+            with ui.card().classes('w-full bg-slate-900 border border-slate-700'):
+                with ui.row().classes('w-full items-center justify-between no-wrap'):
+                    
+                    # Left: Stats
+                    with ui.column().classes('gap-1'):
+                        ui.label(entry.get('date', 'Unknown Date')).classes('text-xs text-slate-500')
+                        
+                        # PnL Color
+                        pnl = entry.get('pnl', 0)
+                        color = 'text-green-400' if pnl >= 0 else 'text-red-400'
+                        sign = '+' if pnl >= 0 else ''
+                        
+                        with ui.row().classes('items-baseline gap-2'):
+                            ui.label(f"{sign}€{pnl}").classes(f'text-2xl font-bold {color}')
+                            ui.label(f"End GA: €{entry.get('end_ga', 0)}").classes('text-sm text-slate-400')
 
-        if not rows:
-            with ui.card().classes('w-full bg-slate-900 p-8 items-center'):
-                ui.icon('history_toggle_off', size='4xl', color='slate-700')
-                ui.label('No sessions recorded yet.').classes('text-slate-500')
-                ui.label('Go to Live Cockpit to play.').classes('text-sm text-slate-600')
-        else:
-            # AG Grid Table (Professional Data View)
-            with ui.card().classes('w-full bg-slate-900 p-0 overflow-hidden'):
-                ui.aggrid({
-                    'columnDefs': [
-                        {'headerName': '#', 'field': 'id', 'width': 70, 'sortable': True},
-                        {'headerName': 'Date', 'field': 'date', 'width': 180, 'sortable': True},
-                        {'headerName': 'Start', 'field': 'start', 'width': 100},
-                        {'headerName': 'End', 'field': 'end', 'width': 100},
-                        {'headerName': 'Shoes', 'field': 'shoes', 'width': 90},
-                        {
-                            'headerName': 'PnL', 
-                            'field': 'pnl', 
-                            'width': 120, 
-                            'sortable': True,
-                            'cellStyle': {'font-weight': 'bold'},
-                            # Color coding positive/negative values
-                            'cellClassRules': {
-                                'text-green-400': 'x >= 0',
-                                'text-red-400': 'x < 0'
-                            },
-                            # Format as currency
-                            'valueFormatter': "'€' + value" 
-                        },
-                    ],
-                    'rowData': rows,
-                    'rowSelection': 'single',
-                }).classes('h-96 w-full theme-balham-dark')
-                
-            # Export / Summary
-            with ui.row().classes('w-full justify-end text-slate-500 text-xs'):
-                ui.label(f"Total Sessions: {len(rows)}")
+                    # Right: Delete Button
+                    # We wrap the delete logic in a closure to capture the specific entry date
+                    def make_delete_handler(date_to_delete):
+                        def handler():
+                            delete_session_log(date_to_delete)
+                            ui.notify('Log Deleted', type='negative')
+                            show_session_log() # Refresh page
+                        return handler
+
+                    ui.button(icon='delete', color='red', on_click=make_delete_handler(entry.get('date'))) \
+                        .props('flat dense').classes('opacity-50 hover:opacity-100')
