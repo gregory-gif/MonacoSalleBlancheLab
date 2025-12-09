@@ -8,7 +8,7 @@ import json
 
 # Internal Imports
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
-from engine.tier_params import TIER_MAP, TierConfig, generate_tier_map, get_tier_for_ga
+from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
 
 # SBM LOYALTY TIERS
