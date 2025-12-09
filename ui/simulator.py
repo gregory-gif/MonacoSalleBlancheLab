@@ -235,6 +235,24 @@ def show_simulator():
         select_saved.options = list(saved.keys())
         select_saved.update()
 
+    def get_current_ui_config():
+        """Helper to scrape all UI sliders into a config dict."""
+        return {
+            'tac_safety': slider_safety.value,
+            'tac_iron': slider_iron_gate.value,
+            'tac_press': select_press.value,
+            'tac_depth': slider_press_depth.value,
+            'tac_shoes': slider_shoes.value,
+            'tac_bet': select_bet_strat.value,
+            'tac_penalty': switch_penalty.value,
+            'risk_stop': slider_stop_loss.value,
+            'risk_prof': slider_profit.value,
+            'risk_ratch': switch_ratchet.value,
+            'risk_ratch_mode': select_ratchet_mode.value,
+            # include other eco params if needed for completeness, 
+            # but Cockpit mostly needs Tactics & Risk
+        }
+
     def save_current_strategy():
         name = input_name.value
         if not name:
@@ -245,7 +263,10 @@ def show_simulator():
         if 'saved_strategies' not in profile:
             profile['saved_strategies'] = {}
             
-        config = {
+        # Full Config for Sim
+        config = get_current_ui_config()
+        # Add Sim specific params
+        config.update({
             'sim_num': slider_num_sims.value,
             'sim_years': slider_years.value,
             'sim_freq': slider_frequency.value,
@@ -257,27 +278,29 @@ def show_simulator():
             'eco_insolvency': slider_insolvency.value,
             'eco_tax_thresh': slider_tax_thresh.value,
             'eco_tax_rate': slider_tax_rate.value,
-            'tac_safety': slider_safety.value,
-            'tac_iron': slider_iron_gate.value,
-            'tac_press': select_press.value,
-            'tac_depth': slider_press_depth.value,
-            'tac_shoes': slider_shoes.value,
-            'tac_bet': select_bet_strat.value,
-            'tac_penalty': switch_penalty.value,
-            'risk_stop': slider_stop_loss.value,
-            'risk_prof': slider_profit.value,
-            'risk_ratch': switch_ratchet.value,
-            'risk_ratch_mode': select_ratchet_mode.value, 
             'gold_stat': select_status.value,
             'gold_earn': slider_earn_rate.value,
             'start_ga': slider_start_ga.value
-        }
+        })
         
         profile['saved_strategies'][name] = config
         save_profile(profile)
         ui.notify(f'Saved: {name}', type='positive')
         update_strategy_list()
         input_name.value = ''
+
+    def deploy_to_cockpit():
+        """Saves current UI settings as the Active Strategy for Live Play."""
+        config = get_current_ui_config()
+        
+        profile = load_profile()
+        profile['active_strategy'] = config
+        save_profile(profile)
+        
+        ui.notify('STRATEGY DEPLOYED TO COCKPIT', type='positive', icon='rocket_launch')
+        # Visual feedback
+        btn_deploy.props('color=green-10 text-color=green label="DEPLOYED!"')
+        ui.timer(2.0, lambda: btn_deploy.props('color=purple label="DEPLOY TO LIVE"'))
 
     def load_selected_strategy():
         name = select_saved.value
@@ -297,7 +320,7 @@ def show_simulator():
         slider_tax_rate.value = config.get('eco_tax_rate', 25)
         switch_holiday.value = config.get('eco_hol', False)
         slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
-        slider_insolvency.value = config.get('eco_insolvency', 1000) # CHANGED DEFAULT
+        slider_insolvency.value = config.get('eco_insolvency', 1500)
         slider_safety.value = config.get('tac_safety', 25)
         slider_iron_gate.value = config.get('tac_iron', 3)
         select_press.value = config.get('tac_press', 1)
@@ -627,6 +650,8 @@ def show_simulator():
                     with ui.row().classes('w-full items-center gap-4'):
                         input_name = ui.input('Save Name').props('dark').classes('flex-grow')
                         ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
+                        # NEW BUTTON
+                        btn_deploy = ui.button('DEPLOY TO LIVE', on_click=deploy_to_cockpit).props('icon=rocket_launch color=purple')
                     
                     with ui.row().classes('w-full items-center gap-4'):
                         select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
