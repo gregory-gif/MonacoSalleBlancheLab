@@ -1,6 +1,5 @@
-nicegui>=1.4.0
-plotly>=5.18.0
-pandas>=2.1.0
-numpy>=1.26.0
-gunicorn>=21.2.0
-uvicorn>=0.23.0
+nicegui
+plotly
+numpy
+pymongo[srv]  # This installs the driver and the DNS extras
+dnspython     # Essential for the +srv connection string
