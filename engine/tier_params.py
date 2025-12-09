@@ -17,22 +17,25 @@ BASE_BET_T1 = 50.0
 def generate_tier_map(safety_factor: int, max_tier_cap: int = 0) -> dict:
     """
     Generates the Tier Map.
-    if max_tier_cap == 2 (Fortress Mode):
-       - GA >= 2000: Bet €100 (CRUISING)
-       - GA < 2000:  Bet €50  (DEFENSE)
+    
+    If max_tier_cap == 2, we activate 'FORTRESS HYSTERESIS':
+    - Tier 2 (€100) is ACTIVE as long as Bankroll >= €2,500.
+    - We only drop to Tier 1 (€50) if we fall below €2,500.
+    - Insolvency (<1000) handled by simulator loop check.
     """
     tiers = {}
     
-    # --- FORTRESS LOGIC (Hard Override) ---
+    # --- FORTRESS LOGIC (Sticky Tiers) ---
     if max_tier_cap == 2:
-        # THRESHOLD ADJUSTED: 2000 (Matches Start GA)
-        CRUISE_ALTITUDE = 2000.0
+        # THRESHOLD: The "Hard Deck" is €2,500.
+        STICKY_THRESHOLD = 2500.0
         
-        # Tier 1: €50 Bet (Defense Mode)
+        # Tier 1: Defense Mode (€50)
+        # Range: 0 to 2,499
         tiers[1] = TierConfig(
             level=1,
             min_ga=0,
-            max_ga=CRUISE_ALTITUDE, 
+            max_ga=STICKY_THRESHOLD, 
             base_unit=50.0,
             press_unit=50.0,
             stop_loss=-(50.0 * 10),
@@ -40,10 +43,13 @@ def generate_tier_map(safety_factor: int, max_tier_cap: int = 0) -> dict:
             catastrophic_cap=-(50.0 * 20)
         )
         
-        # Tier 2: €100 Bet (Cruising Mode)
+        # Tier 2: Cruising Mode (€100)
+        # Range: 2,500 to Infinity
+        # Note: This overrides linear safety. Even if you have €2,501 and Safety is 50x
+        # (which usually requires €5,000), this forces the €100 bet.
         tiers[2] = TierConfig(
             level=2,
-            min_ga=CRUISE_ALTITUDE,
+            min_ga=STICKY_THRESHOLD,
             max_ga=float('inf'),
             base_unit=100.0,
             press_unit=100.0,
@@ -53,14 +59,15 @@ def generate_tier_map(safety_factor: int, max_tier_cap: int = 0) -> dict:
         )
         return tiers
 
-    # --- STANDARD MATH LOGIC (Exponential) ---
+    # --- STANDARD LINEAR MATH (Exponential Growth) ---
+    # Only used if Cap is OFF
     multipliers = [1, 2, 4, 10, 20, 40] 
     
     for i, mult in enumerate(multipliers):
         level = i + 1
         base = BASE_BET_T1 * mult
         
-        # Standard safety calc
+        # Linear Safety: Min GA = Base * Safety Factor
         min_ga = base * safety_factor
         
         is_last_tier = (i == len(multipliers) - 1)
