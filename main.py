@@ -2,7 +2,7 @@ import os
 from nicegui import ui
 from ui.layout import create_layout
 from ui.dashboard import show_dashboard
-from ui.scorecard import show_scorecard
+from ui.scorecard import show_scorecard  # <--- Updated Import
 from ui.simulator import show_simulator
 from ui.session_log import show_session_log
 
@@ -20,7 +20,7 @@ def render_page(target_func):
 
 # 2. Navigation Callbacks
 def nav_dashboard(): render_page(show_dashboard)
-def nav_cockpit(): render_page(show_scorecard)
+def nav_cockpit(): render_page(show_scorecard)  # <--- Updated Call
 def nav_simulator(): render_page(show_simulator)
 def nav_logs(): render_page(show_session_log)
 
@@ -41,8 +41,6 @@ with content_container:
 print("STARTING NICEGUI APP...")
 
 # 5. Launch the App (Native Mode)
-# We read the PORT from the environment (Render sets this)
-# We bind to 0.0.0.0 to be accessible outside the container
 ui.run(
     title='Salle Blanche Lab',
     viewport='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
