@@ -130,9 +130,13 @@ class SimulationWorker:
                         contrib_win, contrib_loss, overrides, use_ratchet,
                         use_tax, use_holiday, safety_factor, 
                         target_points, earn_rate,
-                        holiday_ceiling, insolvency_floor):
+                        holiday_ceiling, insolvency_floor,
+                        cap_tier_2):
         
-        tier_map = generate_tier_map(safety_factor)
+        # GENERATE TIER MAP (WITH OPTIONAL CAP)
+        max_t = 2 if cap_tier_2 else 0
+        tier_map = generate_tier_map(safety_factor, max_tier_cap=max_t)
+        
         trajectory = []
         current_ga = start_ga
         sessions_played_total = 0
@@ -155,27 +159,6 @@ class SimulationWorker:
             if m > 0 and m % 12 == 0:
                 current_year_points = 0
                 current_year_pnl = 0.0
-
-            # --- TURBO LOGIC CHECK ---
-            is_turbo_month = overrides.turbo_month_enabled and ((m + 1) % 12 == 0)
-            
-            current_month_overrides = overrides
-            if is_turbo_month:
-                current_month_overrides = StrategyOverrides(
-                    iron_gate_limit=overrides.iron_gate_limit,
-                    stop_loss_units=overrides.stop_loss_units,
-                    profit_lock_units=overrides.profit_lock_units,
-                    press_trigger_wins=overrides.press_trigger_wins,
-                    press_depth=overrides.press_depth,
-                    ratchet_enabled=overrides.ratchet_enabled,
-                    ratchet_mode=overrides.turbo_mode, # SWAP HERE
-                    shoes_per_session=overrides.shoes_per_session,
-                    bet_strategy=overrides.bet_strategy,
-                    penalty_box_enabled=overrides.penalty_box_enabled,
-                    turbo_month_enabled=False, 
-                    tax_threshold=overrides.tax_threshold,
-                    tax_rate=overrides.tax_rate
-                )
 
             tax_thresh = overrides.tax_threshold
             tax_rate = overrides.tax_rate / 100.0
@@ -214,7 +197,7 @@ class SimulationWorker:
                     if current_year_pnl <= current_tier.catastrophic_cap:
                         is_penalty = True
 
-                    pnl, vol = SimulationWorker.run_session(current_ga, current_month_overrides, tier_map, use_ratchet, penalty_mode=is_penalty)
+                    pnl, vol = SimulationWorker.run_session(current_ga, overrides, tier_map, use_ratchet, penalty_mode=is_penalty)
                     
                     current_ga += pnl
                     m_play_pnl += pnl
@@ -256,24 +239,6 @@ def show_simulator():
         select_saved.options = list(saved.keys())
         select_saved.update()
 
-    def get_current_ui_config():
-        """Helper to scrape all UI sliders into a config dict."""
-        return {
-            'tac_safety': slider_safety.value,
-            'tac_iron': slider_iron_gate.value,
-            'tac_press': select_press.value,
-            'tac_depth': slider_press_depth.value,
-            'tac_shoes': slider_shoes.value,
-            'tac_bet': select_bet_strat.value,
-            'tac_penalty': switch_penalty.value,
-            'risk_stop': slider_stop_loss.value,
-            'risk_prof': slider_profit.value,
-            'risk_ratch': switch_ratchet.value,
-            'risk_ratch_mode': select_ratchet_mode.value,
-            'turbo_enabled': switch_turbo.value,
-            'turbo_mode': select_turbo_mode.value
-        }
-
     def save_current_strategy():
         name = input_name.value
         if not name:
@@ -284,8 +249,7 @@ def show_simulator():
         if 'saved_strategies' not in profile:
             profile['saved_strategies'] = {}
             
-        config = get_current_ui_config()
-        config.update({
+        config = {
             'sim_num': slider_num_sims.value,
             'sim_years': slider_years.value,
             'sim_freq': slider_frequency.value,
@@ -297,27 +261,28 @@ def show_simulator():
             'eco_insolvency': slider_insolvency.value,
             'eco_tax_thresh': slider_tax_thresh.value,
             'eco_tax_rate': slider_tax_rate.value,
+            'tac_safety': slider_safety.value,
+            'tac_iron': slider_iron_gate.value,
+            'tac_press': select_press.value,
+            'tac_depth': slider_press_depth.value,
+            'tac_shoes': slider_shoes.value,
+            'tac_bet': select_bet_strat.value,
+            'tac_penalty': switch_penalty.value,
+            'tac_cap_tier2': switch_cap_tier2.value, # NEW
+            'risk_stop': slider_stop_loss.value,
+            'risk_prof': slider_profit.value,
+            'risk_ratch': switch_ratchet.value,
+            'risk_ratch_mode': select_ratchet_mode.value, 
             'gold_stat': select_status.value,
             'gold_earn': slider_earn_rate.value,
             'start_ga': slider_start_ga.value
-        })
+        }
         
         profile['saved_strategies'][name] = config
         save_profile(profile)
         ui.notify(f'Saved: {name}', type='positive')
         update_strategy_list()
         input_name.value = ''
-
-    def deploy_to_cockpit():
-        """Saves current UI settings as the Active Strategy for Live Play."""
-        config = get_current_ui_config()
-        profile = load_profile()
-        profile['active_strategy'] = config
-        save_profile(profile)
-        
-        ui.notify('STRATEGY DEPLOYED TO COCKPIT', type='positive', icon='rocket_launch')
-        btn_deploy.props('color=green-10 text-color=green label="DEPLOYED!"')
-        ui.timer(2.0, lambda: btn_deploy.props('color=purple label="DEPLOY TO LIVE"'))
 
     def load_selected_strategy():
         name = select_saved.value
@@ -337,7 +302,7 @@ def show_simulator():
         slider_tax_rate.value = config.get('eco_tax_rate', 25)
         switch_holiday.value = config.get('eco_hol', False)
         slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
-        slider_insolvency.value = config.get('eco_insolvency', 1500)
+        slider_insolvency.value = config.get('eco_insolvency', 1000) 
         slider_safety.value = config.get('tac_safety', 25)
         slider_iron_gate.value = config.get('tac_iron', 3)
         select_press.value = config.get('tac_press', 1)
@@ -345,14 +310,11 @@ def show_simulator():
         slider_shoes.value = config.get('tac_shoes', 3)
         select_bet_strat.value = config.get('tac_bet', 'Banker')
         switch_penalty.value = config.get('tac_penalty', True)
+        switch_cap_tier2.value = config.get('tac_cap_tier2', False) # NEW
         slider_stop_loss.value = config.get('risk_stop', 10)
         slider_profit.value = config.get('risk_prof', 10)
         switch_ratchet.value = config.get('risk_ratch', False)
         select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
-        
-        switch_turbo.value = config.get('turbo_enabled', False)
-        select_turbo_mode.value = config.get('turbo_mode', 'Deep Stack')
-
         select_status.value = config.get('gold_stat', 'Gold')
         slider_earn_rate.value = config.get('gold_earn', 10)
         slider_start_ga.value = config.get('start_ga', 2000)
@@ -373,7 +335,10 @@ def show_simulator():
 
     def update_ladder_preview():
         factor = slider_safety.value
-        t_map = generate_tier_map(factor)
+        # Check if Tier 2 Cap is active
+        max_t = 2 if switch_cap_tier2.value else 0
+        t_map = generate_tier_map(factor, max_tier_cap=max_t)
+        
         rows = []
         for level, t in t_map.items():
             risk_pct = (t.base_unit / t.min_ga) * 100
@@ -418,13 +383,9 @@ def show_simulator():
                 'safety': int(slider_safety.value),
                 'start_ga': int(slider_start_ga.value),
                 'press_depth': int(slider_press_depth.value),
-                'ratchet_pct': 0.0, 
-                'ratchet_u': 0,     
-                'target_u': 0,      
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
-                'turbo_enabled': switch_turbo.value,
-                'turbo_mode': select_turbo_mode.value
+                'cap_tier2': switch_cap_tier2.value # NEW
             }
             
             total_months = config['years'] * 12
@@ -442,9 +403,7 @@ def show_simulator():
                 shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value,
-                ratchet_mode=select_ratchet_mode.value,
-                turbo_month_enabled=switch_turbo.value,
-                turbo_mode=select_turbo_mode.value
+                ratchet_mode=select_ratchet_mode.value 
             )
 
             start_ga = config['start_ga']
@@ -462,7 +421,8 @@ def show_simulator():
                             config['contrib_win'], config['contrib_loss'], overrides, 
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
-                            config['hol_ceil'], config['insolvency']
+                            config['hol_ceil'], config['insolvency'],
+                            config['cap_tier2'] # NEW
                         )
                         batch_data.append(res)
                     return batch_data
@@ -624,17 +584,19 @@ def show_simulator():
                 lines.append(f"Target: {config['status_target_name']} ({tgt_pts:,.0f} pts) | Earn Rate: {config['earn_rate']}/€100")
                 lines.append(f"Betting: {overrides.bet_strategy.name} | Shoes/Sess: {overrides.shoes_per_session}")
                 lines.append(f"Tier Safety: {config['safety']}x | Penalty Box: {overrides.penalty_box_enabled}")
+                
+                # Report Cap Status
+                if config['cap_tier2']:
+                    lines.append(f"Betting Cap: ACTIVE (Max Tier 2 / €100)")
+                else:
+                    lines.append(f"Betting Cap: OFF (Scale to Infinity)")
+
                 lines.append(f"Iron Gate: {overrides.iron_gate_limit} Losses")
                 lines.append(f"Pressing: Trigger {overrides.press_trigger_wins} Wins | Depth {overrides.press_depth}")
                 
-                # UPDATED RATCHET TEXT (MODE AWARE + TURBO)
+                # UPDATED RATCHET TEXT (MODE AWARE)
                 if overrides.ratchet_enabled:
                     lines.append(f"Ratchet: ON (Mode: {overrides.ratchet_mode.upper()})")
-                    if overrides.turbo_month_enabled:
-                        lines.append(f"TURBO MONTH: ENABLED (Month 12 uses {overrides.turbo_mode.upper()})")
-                    else:
-                        lines.append(f"Turbo Month: OFF")
-                        
                     if overrides.ratchet_mode == "Sprint":
                         lines.append(f"   Ladders: +6>3, +9>5, +12>8, +15>STOP")
                     elif overrides.ratchet_mode == "Standard":
@@ -680,8 +642,6 @@ def show_simulator():
                     with ui.row().classes('w-full items-center gap-4'):
                         input_name = ui.input('Save Name').props('dark').classes('flex-grow')
                         ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
-                        # DEPLOY BUTTON
-                        btn_deploy = ui.button('DEPLOY TO LIVE', on_click=deploy_to_cockpit).props('icon=rocket_launch color=purple')
                     
                     with ui.row().classes('w-full items-center gap-4'):
                         select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
@@ -817,6 +777,10 @@ def show_simulator():
                     
                     switch_penalty = ui.switch('Penalty Box').props('color=red')
                     switch_penalty.value = True
+                    
+                    # NEW TOGGLE FOR TIER CAP
+                    switch_cap_tier2 = ui.switch('Cap @ Tier 2 (Max €100)').props('color=yellow').on_value_change(update_ladder_preview)
+                    switch_cap_tier2.value = False
 
                 with ui.column():
                     ui.label('RISK & REWARD').classes('font-bold text-red-400')
@@ -845,13 +809,6 @@ def show_simulator():
                              ui.label('Mode').classes('text-xs text-yellow-400')
                              select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack'], value='Standard').props('dense options-dense').classes('w-32')
 
-                    # --- TURBO TOGGLE ROW ---
-                    with ui.row().classes('items-center justify-between mt-2'):
-                         switch_turbo = ui.switch('Turbo Month').props('color=purple')
-                         with ui.column():
-                             ui.label('Mode').classes('text-xs text-purple-400')
-                             select_turbo_mode = ui.select(['Sprint', 'Standard', 'Deep Stack'], value='Deep Stack').props('dense options-dense').classes('w-32')
-
                     ui.label('Status Target').classes('text-xs text-yellow-400 mt-2')
                     select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').classes('w-full')
                     
@@ -870,7 +827,7 @@ def show_simulator():
                      with ui.row().classes('w-full justify-between'):
                         ui.label('Starting Capital').classes('text-xs text-green-400')
                         lbl_start_ga = ui.label()
-                     slider_start_ga = ui.slider(min=1000, max=5000, step=100, value=2000).props('color=green')
+                     slider_start_ga = ui.slider(min=1000, max=3000, step=100, value=2000).props('color=green')
                      lbl_start_ga.bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
                      lbl_start_ga.set_text('€2000')
                 
