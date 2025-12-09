@@ -1,43 +1,79 @@
 from nicegui import ui
 from utils.persistence import load_profile, save_profile, log_session_result
-from engine.tier_params import get_tier_for_ga
+from engine.tier_params import generate_tier_map, get_tier_for_ga
 
 def show_scorecard():
     # 1. Load Data
     profile = load_profile()
     db_ga = profile.get('ga', 1700.0)
     
-    # State Variables
+    # 2. State Variables
     state = {
         'start_ga': db_ga,
         'end_ga': db_ga,
         'shoes': 3
     }
     
-    # 2. Logic: Calculate Mission Parameters
-    def calculate_mission(bankroll):
-        tier = get_tier_for_ga(bankroll)
+    # 3. Dynamic Strategy Engine
+    def get_strategy_numbers(bankroll):
+        # Default defaults
+        safety_val = 25
+        ratchet_mode = 'Standard'
+        stop_loss_u = 10
+        press_trigger = 2
+        
+        # Override with Active Strategy if deployed
+        active_strat = profile.get('active_strategy')
+        if active_strat:
+            safety_val = int(active_strat.get('tac_safety', 25))
+            ratchet_mode = active_strat.get('risk_ratch_mode', 'Standard')
+            stop_loss_u = int(active_strat.get('risk_stop', 10))
+            press_trigger = int(active_strat.get('tac_press', 2)) # 0=Flat, 1=1Win, 2=2Wins
+
+        # Generate Custom Tier Map based on Strategy
+        custom_tier_map = generate_tier_map(safety_val)
+        tier = get_tier_for_ga(bankroll, custom_tier_map)
         u = tier.base_unit
         
-        return {
-            'tier_level': tier.level,
-            'base_unit': u,
-            'press_unit': tier.press_unit,
-            'stop_loss': bankroll - (10 * u),
-            'ladder': [
+        # Calculate Ladder based on Mode
+        ladder = []
+        if ratchet_mode == 'Sprint':
+            ladder = [
+                {'name': 'STEP 1', 'hit': bankroll + (6*u), 'lock': bankroll + (3*u), 'u': '+6u'},
+                {'name': 'STEP 2', 'hit': bankroll + (9*u), 'lock': bankroll + (5*u), 'u': '+9u'},
+                {'name': 'STEP 3', 'hit': bankroll + (12*u), 'lock': bankroll + (8*u), 'u': '+12u'},
+                {'name': 'MAX', 'hit': bankroll + (15*u), 'lock': 'COLOR UP', 'u': '+15u'}
+            ]
+        elif ratchet_mode == 'Deep Stack':
+            ladder = [
+                {'name': 'STEP 1', 'hit': bankroll + (10*u), 'lock': bankroll + (4*u), 'u': '+10u'},
+                {'name': 'STEP 2', 'hit': bankroll + (15*u), 'lock': bankroll + (8*u), 'u': '+15u'},
+                {'name': 'STEP 3', 'hit': bankroll + (25*u), 'lock': bankroll + (15*u), 'u': '+25u'},
+                {'name': 'MAX', 'hit': bankroll + (40*u), 'lock': 'COLOR UP', 'u': '+40u'}
+            ]
+        else: # Standard
+            ladder = [
                 {'name': 'STEP 1', 'hit': bankroll + (8*u), 'lock': bankroll + (3*u), 'u': '+8u'},
                 {'name': 'STEP 2', 'hit': bankroll + (12*u), 'lock': bankroll + (5*u), 'u': '+12u'},
                 {'name': 'STEP 3', 'hit': bankroll + (16*u), 'lock': bankroll + (7*u), 'u': '+16u'},
                 {'name': 'MAX', 'hit': bankroll + (20*u), 'lock': 'COLOR UP', 'u': '+20u'}
             ]
+
+        return {
+            'tier_level': tier.level,
+            'base_unit': u,
+            'press_unit': tier.press_unit,
+            'press_rule': f"After {press_trigger} Wins" if press_trigger > 0 else "Flat Bet",
+            'stop_loss': bankroll - (stop_loss_u * u),
+            'stop_loss_u': stop_loss_u,
+            'ladder': ladder,
+            'mode_name': ratchet_mode.upper()
         }
 
-    # 3. UI Layout
+    # 4. UI Layout
     with ui.column().classes('w-full max-w-3xl mx-auto gap-8 p-4'):
         
-        # ==========================================
-        # SECTION 1: FLIGHT PLAN (Pre-Session)
-        # ==========================================
+        # --- SECTION A: PRE-FLIGHT BRIEFING ---
         with ui.card().classes('w-full bg-slate-900 border border-slate-700'):
             # Header
             with ui.row().classes('w-full items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950'):
@@ -51,7 +87,7 @@ def show_scorecard():
 
             def render_mission(bankroll):
                 mission_container.clear()
-                data = calculate_mission(bankroll)
+                data = get_strategy_numbers(bankroll)
                 
                 with mission_container:
                     with ui.column().classes('p-6 w-full gap-6'):
@@ -76,12 +112,14 @@ def show_scorecard():
                         # --- B. RISK PARAMETERS ---
                         with ui.row().classes('w-full items-center justify-between bg-red-900/20 border border-red-900/50 p-4 rounded'):
                             with ui.column().classes('gap-0'):
-                                ui.label('HARD STOP LOSS').classes('text-sm font-bold text-red-400')
+                                ui.label(f'HARD STOP (-{data["stop_loss_u"]}u)').classes('text-sm font-bold text-red-400')
                                 ui.label('Walk away immediately if stack hits:').classes('text-xs text-red-300 opacity-80')
                             ui.label(f"€{data['stop_loss']:,.0f}").classes('text-3xl font-black text-red-500')
 
                         # --- C. RATCHET LADDER ---
-                        ui.label('PROFIT LADDER (Mental Checkpoints)').classes('text-xs text-slate-500 font-bold uppercase mt-2')
+                        with ui.row().classes('w-full justify-between items-end mt-2'):
+                            ui.label(f'PROFIT LADDER ({data["mode_name"]})').classes('text-xs text-slate-500 font-bold uppercase')
+                            ui.label('Mental Checkpoints').classes('text-xs text-slate-600 italic')
                         
                         with ui.column().classes('w-full gap-2'):
                             for step in data['ladder']:
@@ -139,28 +177,20 @@ def show_scorecard():
 
                 # 3. Submit Button
                 def submit_log():
-                    # We grab the current value from the rendered mission context or just re-read the input/profile logic
-                    # Ideally, if user adjusted start_ga in the expander, we need to capture that.
-                    # Simplified: We assume standard flow (Database -> Play -> Result). 
-                    # If they manually adjusted start, we assume they updated the dashboard/profile first or we can add state tracking here.
-                    
-                    # For V1, let's use the DB Start GA.
-                    s_val = db_ga 
+                    s_val = state['start_ga'] 
                     e_val = input_end.value
                     shoes = slider_shoes.value
                     
                     if e_val is not None:
-                        # Save History
                         log_session_result(float(s_val), float(e_val), int(shoes))
                         
-                        # Update Profile (Wallet)
                         profile['ga'] = float(e_val)
                         save_profile(profile)
                         
                         ui.notify(f'Session Logged! New Balance: €{e_val:,.0f}', type='positive')
-                        ui.open('/') # Return to dashboard
+                        ui.open('/') 
 
                 ui.button('LOG SESSION & UPDATE WALLET', on_click=submit_log).classes('w-full h-16 text-lg font-bold bg-green-600 hover:bg-green-500 shadow-xl rounded-lg')
 
-# Alias for main.py import
+# Compatibility Alias
 show_scorecard = show_scorecard
