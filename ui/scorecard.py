@@ -28,35 +28,35 @@ def show_scorecard():
             safety_val = int(active_strat.get('tac_safety', 25))
             ratchet_mode = active_strat.get('risk_ratch_mode', 'Standard')
             stop_loss_u = int(active_strat.get('risk_stop', 10))
-            press_trigger = int(active_strat.get('tac_press', 2)) # 0=Flat, 1=1Win, 2=2Wins
+            press_trigger = int(active_strat.get('tac_press', 2)) 
 
         # Generate Custom Tier Map based on Strategy
         custom_tier_map = generate_tier_map(safety_val)
         tier = get_tier_for_ga(bankroll, custom_tier_map)
         u = tier.base_unit
         
-        # Calculate Ladder based on Mode
+        # Calculate RELATIVE Ladder (Profit Amounts)
         ladder = []
         if ratchet_mode == 'Sprint':
             ladder = [
-                {'name': 'STEP 1', 'hit': bankroll + (6*u), 'lock': bankroll + (3*u), 'u': '+6u'},
-                {'name': 'STEP 2', 'hit': bankroll + (9*u), 'lock': bankroll + (5*u), 'u': '+9u'},
-                {'name': 'STEP 3', 'hit': bankroll + (12*u), 'lock': bankroll + (8*u), 'u': '+12u'},
-                {'name': 'MAX', 'hit': bankroll + (15*u), 'lock': 'COLOR UP', 'u': '+15u'}
+                {'name': 'STEP 1', 'hit': 6*u, 'lock': 3*u, 'u': '+6u'},
+                {'name': 'STEP 2', 'hit': 9*u, 'lock': 5*u, 'u': '+9u'},
+                {'name': 'STEP 3', 'hit': 12*u, 'lock': 8*u, 'u': '+12u'},
+                {'name': 'MAX', 'hit': 15*u, 'lock': 'COLOR UP', 'u': '+15u'}
             ]
         elif ratchet_mode == 'Deep Stack':
             ladder = [
-                {'name': 'STEP 1', 'hit': bankroll + (10*u), 'lock': bankroll + (4*u), 'u': '+10u'},
-                {'name': 'STEP 2', 'hit': bankroll + (15*u), 'lock': bankroll + (8*u), 'u': '+15u'},
-                {'name': 'STEP 3', 'hit': bankroll + (25*u), 'lock': bankroll + (15*u), 'u': '+25u'},
-                {'name': 'MAX', 'hit': bankroll + (40*u), 'lock': 'COLOR UP', 'u': '+40u'}
+                {'name': 'STEP 1', 'hit': 10*u, 'lock': 4*u, 'u': '+10u'},
+                {'name': 'STEP 2', 'hit': 15*u, 'lock': 8*u, 'u': '+15u'},
+                {'name': 'STEP 3', 'hit': 25*u, 'lock': 15*u, 'u': '+25u'},
+                {'name': 'MAX', 'hit': 40*u, 'lock': 'COLOR UP', 'u': '+40u'}
             ]
         else: # Standard
             ladder = [
-                {'name': 'STEP 1', 'hit': bankroll + (8*u), 'lock': bankroll + (3*u), 'u': '+8u'},
-                {'name': 'STEP 2', 'hit': bankroll + (12*u), 'lock': bankroll + (5*u), 'u': '+12u'},
-                {'name': 'STEP 3', 'hit': bankroll + (16*u), 'lock': bankroll + (7*u), 'u': '+16u'},
-                {'name': 'MAX', 'hit': bankroll + (20*u), 'lock': 'COLOR UP', 'u': '+20u'}
+                {'name': 'STEP 1', 'hit': 8*u, 'lock': 3*u, 'u': '+8u'},
+                {'name': 'STEP 2', 'hit': 12*u, 'lock': 5*u, 'u': '+12u'},
+                {'name': 'STEP 3', 'hit': 16*u, 'lock': 7*u, 'u': '+16u'},
+                {'name': 'MAX', 'hit': 20*u, 'lock': 'COLOR UP', 'u': '+20u'}
             ]
 
         return {
@@ -64,7 +64,7 @@ def show_scorecard():
             'base_unit': u,
             'press_unit': tier.press_unit,
             'press_rule': f"After {press_trigger} Wins" if press_trigger > 0 else "Flat Bet",
-            'stop_loss': bankroll - (stop_loss_u * u),
+            'stop_loss_val': stop_loss_u * u, # Amount to lose
             'stop_loss_u': stop_loss_u,
             'ladder': ladder,
             'mode_name': ratchet_mode.upper()
@@ -112,14 +112,14 @@ def show_scorecard():
                         # --- B. RISK PARAMETERS ---
                         with ui.row().classes('w-full items-center justify-between bg-red-900/20 border border-red-900/50 p-4 rounded'):
                             with ui.column().classes('gap-0'):
-                                ui.label(f'HARD STOP (-{data["stop_loss_u"]}u)').classes('text-sm font-bold text-red-400')
-                                ui.label('Walk away immediately if stack hits:').classes('text-xs text-red-300 opacity-80')
-                            ui.label(f"€{data['stop_loss']:,.0f}").classes('text-3xl font-black text-red-500')
+                                ui.label(f'STOP LOSS LIMIT').classes('text-sm font-bold text-red-400')
+                                ui.label(f'Leave if you lose {data["stop_loss_u"]} units').classes('text-xs text-red-300 opacity-80')
+                            
+                            # Display as Negative Amount (e.g. -€500)
+                            ui.label(f"-€{data['stop_loss_val']:,.0f}").classes('text-3xl font-black text-red-500')
 
                         # --- C. RATCHET LADDER ---
-                        with ui.row().classes('w-full justify-between items-end mt-2'):
-                            ui.label(f'PROFIT LADDER ({data["mode_name"]})').classes('text-xs text-slate-500 font-bold uppercase')
-                            ui.label('Mental Checkpoints').classes('text-xs text-slate-600 italic')
+                        ui.label(f'PROFIT TARGETS ({data["mode_name"]})').classes('text-xs text-slate-500 font-bold uppercase mt-2')
                         
                         with ui.column().classes('w-full gap-2'):
                             for step in data['ladder']:
@@ -128,7 +128,8 @@ def show_scorecard():
                                     with ui.row().classes('items-center gap-3'):
                                         ui.label(step['name']).classes('text-xs font-bold text-slate-600 w-12')
                                         with ui.column().classes('gap-0'):
-                                            ui.label(f"Reach €{step['hit']:,.0f}").classes('text-lg font-bold text-white')
+                                            # Relative Profit
+                                            ui.label(f"Reach +€{step['hit']:,.0f}").classes('text-lg font-bold text-white')
                                             ui.label(f"({step['u']})").classes('text-xs text-green-500')
                                     
                                     ui.icon('arrow_right_alt', color='grey')
@@ -136,7 +137,8 @@ def show_scorecard():
                                     # Lock
                                     lock_display = step['lock']
                                     if isinstance(lock_display, (int, float)):
-                                        ui.label(f"Lock €{lock_display:,.0f}").classes('text-lg font-bold text-yellow-400')
+                                        # Relative Profit Lock
+                                        ui.label(f"Lock +€{lock_display:,.0f}").classes('text-lg font-bold text-yellow-400')
                                     else:
                                         ui.label(lock_display).classes('text-lg font-black text-yellow-400')
 
@@ -164,9 +166,9 @@ def show_scorecard():
                 
                 # 1. Result Input
                 with ui.column().classes('w-full gap-2'):
-                    ui.label('ENDING CHIP COUNT').classes('text-xs font-bold text-slate-400 uppercase')
+                    ui.label('ENDING CHIP COUNT (TOTAL)').classes('text-xs font-bold text-slate-400 uppercase')
                     input_end = ui.number(value=db_ga, format='%.0f', placeholder='e.g. 2350').props('outlined dark prefix="€" input-class="text-4xl font-black text-white text-center"').classes('w-full')
-                    ui.label('Count your physical chips before cashing out.').classes('text-xs text-slate-600 text-center w-full')
+                    ui.label('Enter the total value of chips you cashed out.').classes('text-xs text-slate-600 text-center w-full')
 
                 # 2. Volume Input
                 with ui.column().classes('w-full gap-2'):
@@ -192,5 +194,5 @@ def show_scorecard():
 
                 ui.button('LOG SESSION & UPDATE WALLET', on_click=submit_log).classes('w-full h-16 text-lg font-bold bg-green-600 hover:bg-green-500 shadow-xl rounded-lg')
 
-# Compatibility Alias
+# Alias for main.py import
 show_scorecard = show_scorecard
