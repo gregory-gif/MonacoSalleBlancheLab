@@ -64,8 +64,6 @@ class SimulationWorker:
                 press_depth=overrides.press_depth,
                 ratchet_enabled=True,
                 ratchet_mode=overrides.ratchet_mode, # Pass the mode
-                turbo_month_enabled=overrides.turbo_month_enabled, # Pass Turbo
-                turbo_mode=overrides.turbo_mode,
                 ratchet_lock_pct=0.0,
                 shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy
@@ -154,19 +152,15 @@ class SimulationWorker:
         failed_year_one = False
         
         for m in range(total_months):
-            # Check Year Reset
             if m > 0 and m % 12 == 0:
                 current_year_points = 0
                 current_year_pnl = 0.0
 
             # --- TURBO LOGIC CHECK ---
-            # Is this December (Month 12, 24, 36...)?
             is_turbo_month = overrides.turbo_month_enabled and ((m + 1) % 12 == 0)
             
-            # Temporarily modify the overrides for this month
             current_month_overrides = overrides
             if is_turbo_month:
-                # Create a copy with the swapped mode
                 current_month_overrides = StrategyOverrides(
                     iron_gate_limit=overrides.iron_gate_limit,
                     stop_loss_units=overrides.stop_loss_units,
@@ -178,12 +172,11 @@ class SimulationWorker:
                     shoes_per_session=overrides.shoes_per_session,
                     bet_strategy=overrides.bet_strategy,
                     penalty_box_enabled=overrides.penalty_box_enabled,
-                    turbo_month_enabled=False, # prevent recursion logic issues
+                    turbo_month_enabled=False, 
                     tax_threshold=overrides.tax_threshold,
                     tax_rate=overrides.tax_rate
                 )
 
-            # --- FINANCIALS ---
             tax_thresh = overrides.tax_threshold
             tax_rate = overrides.tax_rate / 100.0
             
@@ -221,7 +214,6 @@ class SimulationWorker:
                     if current_year_pnl <= current_tier.catastrophic_cap:
                         is_penalty = True
 
-                    # Run Session with potential Turbo Override
                     pnl, vol = SimulationWorker.run_session(current_ga, current_month_overrides, tier_map, use_ratchet, penalty_mode=is_penalty)
                     
                     current_ga += pnl
@@ -278,8 +270,8 @@ def show_simulator():
             'risk_prof': slider_profit.value,
             'risk_ratch': switch_ratchet.value,
             'risk_ratch_mode': select_ratchet_mode.value,
-            'turbo_enabled': switch_turbo.value, # NEW
-            'turbo_mode': select_turbo_mode.value # NEW
+            'turbo_enabled': switch_turbo.value,
+            'turbo_mode': select_turbo_mode.value
         }
 
     def save_current_strategy():
@@ -292,9 +284,7 @@ def show_simulator():
         if 'saved_strategies' not in profile:
             profile['saved_strategies'] = {}
             
-        # Full Config for Sim
         config = get_current_ui_config()
-        # Add Sim specific params
         config.update({
             'sim_num': slider_num_sims.value,
             'sim_years': slider_years.value,
@@ -321,13 +311,11 @@ def show_simulator():
     def deploy_to_cockpit():
         """Saves current UI settings as the Active Strategy for Live Play."""
         config = get_current_ui_config()
-        
         profile = load_profile()
         profile['active_strategy'] = config
         save_profile(profile)
         
         ui.notify('STRATEGY DEPLOYED TO COCKPIT', type='positive', icon='rocket_launch')
-        # Visual feedback
         btn_deploy.props('color=green-10 text-color=green label="DEPLOYED!"')
         ui.timer(2.0, lambda: btn_deploy.props('color=purple label="DEPLOY TO LIVE"'))
 
@@ -362,7 +350,6 @@ def show_simulator():
         switch_ratchet.value = config.get('risk_ratch', False)
         select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
         
-        # New Turbo Load
         switch_turbo.value = config.get('turbo_enabled', False)
         select_turbo_mode.value = config.get('turbo_mode', 'Deep Stack')
 
@@ -883,7 +870,7 @@ def show_simulator():
                      with ui.row().classes('w-full justify-between'):
                         ui.label('Starting Capital').classes('text-xs text-green-400')
                         lbl_start_ga = ui.label()
-                     slider_start_ga = ui.slider(min=1000, max=3000, step=100, value=2000).props('color=green')
+                     slider_start_ga = ui.slider(min=1000, max=5000, step=100, value=2000).props('color=green')
                      lbl_start_ga.bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
                      lbl_start_ga.set_text('€2000')
                 
