@@ -1,5 +1,6 @@
 import os
 import json
+import certifi # <--- NEW IMPORT
 from datetime import datetime
 try:
     from pymongo import MongoClient
@@ -19,9 +20,11 @@ def get_db():
     global mongo_client, db
     if MONGO_URL and not mongo_client:
         try:
+            # NEW: We pass tlsCAFile=certifi.where() to fix the SSL Handshake error
             mongo_client = MongoClient(
                 MONGO_URL, 
                 server_api=ServerApi('1'), 
+                tlsCAFile=certifi.where(),
                 serverSelectionTimeoutMS=5000
             )
             # Test connection
