@@ -3,8 +3,6 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict
 from .tier_params import TierConfig
 
-# --- DEFINITIONS START HERE ---
-
 class SniperState(Enum):
     WAIT = auto()
     TRIGGER = auto()
@@ -23,30 +21,20 @@ class BetStrategy(Enum):
 
 @dataclass
 class StrategyOverrides:
-    """
-    Control Center: Allows the Simulator/User to inject custom variables 
-    instead of hardcoded rules.
-    """
     # 1. Progression & Limits
     stop_loss_units: int = 10
     profit_lock_units: int = 6
     press_trigger_wins: int = 2 
-    press_depth: int = 3        # 0=Unlimited, 1-5=Max Steps
+    press_depth: int = 3
     
     # 2. Iron Gate & Defense
-    iron_gate_limit: int = 3    # Consecutive losses to trigger Watcher
-    iron_gate_cooldown: int = 3 # Hands to play flat/wait after resuming
-    shoe1_tripwire_pct: float = 0.50 # % of Stop Loss to trigger Tier Drop in Shoe 1
+    iron_gate_limit: int = 3
+    iron_gate_cooldown: int = 3
+    shoe1_tripwire_pct: float = 0.50
     
     # 3. Ratchet & Survival
     ratchet_enabled: bool = False
-    ratchet_mode: str = "Standard" # 'Sprint', 'Standard', 'Deep Stack'
-    
-    # --- NEW TURBO LOGIC ---
-    turbo_month_enabled: bool = False
-    turbo_mode: str = "Deep Stack" # Mode to switch to in Month 12
-    # -----------------------
-
+    ratchet_mode: str = "Standard" # 'Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'
     ratchet_lock_pct: float = 0.50   
     shoe3_survival_trigger: int = 5  
     shoe3_drop_limit: int = 1        
@@ -55,10 +43,12 @@ class StrategyOverrides:
     tax_threshold: float = 12500.0
     tax_rate: float = 25.0
 
-    # 5. New Variable Logic (Sandbox Mode)
+    # 5. New Variable Logic
     bet_strategy: BetStrategy = BetStrategy.BANKER
     shoes_per_session: int = 3
     penalty_box_enabled: bool = True
+    # New Override for Tier Cap
+    cap_tier2: bool = False
 
 @dataclass
 class SessionState:
@@ -72,8 +62,9 @@ class SessionState:
     
     # Financials
     session_pnl: float = 0.0
-    locked_profit: float = -99999.0 # Ratchet floor
-    peak_session_pnl: float = 0.0   # Track high water mark
+    locked_profit: float = -99999.0
+    initial_stop_loss: float = 0.0 # New tracking for reset
+    peak_session_pnl: float = 0.0
     shoe_pnls: Dict[int, float] = field(default_factory=lambda: {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0})
     
     # Streaks
@@ -93,20 +84,20 @@ class SessionState:
     def __post_init__(self):
         # Initialize locked profit to stop loss initially
         if self.overrides:
-             self.locked_profit = -(self.tier.base_unit * self.overrides.stop_loss_units)
+             sl_val = -(self.tier.base_unit * self.overrides.stop_loss_units)
+             self.locked_profit = sl_val
+             self.initial_stop_loss = sl_val
         else:
              self.locked_profit = self.tier.stop_loss
+             self.initial_stop_loss = self.tier.stop_loss
 
 class BaccaratStrategist:
     @staticmethod
     def get_next_decision(state: SessionState) -> dict:
-        """
-        The Brain: Determines Bet Amount, Mode, and Reason.
-        """
         if state.mode == PlayMode.STOPPED:
              return {'bet_amount': 0, 'reason': "SESSION STOPPED", 'mode': PlayMode.STOPPED}
 
-        # --- 0. CONFIG LOADING ---
+        # Config
         base_unit = state.tier.base_unit
         press_unit = state.tier.press_unit
         
@@ -119,30 +110,42 @@ class BaccaratStrategist:
             profit_target = state.tier.profit_lock
             shoes_max = 3
 
-        # --- 1. GLOBAL STOP CHECKS ---
+        # --- 1. RATCHET STOP CHECK (With Gold Grinder Logic) ---
+        if state.session_pnl <= state.locked_profit:
+            
+            # GOLD GRINDER EXCEPTION:
+            # If we are in "Gold Grinder" mode AND we are NOT in the final shoe...
+            if (state.overrides and 
+                state.overrides.ratchet_mode == "Gold Grinder" and 
+                state.current_shoe < shoes_max):
+                
+                # We do NOT stop. Instead, we reset the Ratchet.
+                # "I sacrifice my locked profit to buy more volume."
+                state.locked_profit = state.initial_stop_loss
+                # We continue playing...
+                
+            elif state.session_pnl <= stop_limit:
+                # Hard Stop Loss is always respected
+                return {'bet_amount': 0, 'reason': "HARD STOP LOSS HIT", 'mode': PlayMode.STOPPED}
+            else:
+                # Standard Ratchet Stop
+                return {'bet_amount': 0, 'reason': "RATCHET PROFIT SECURED", 'mode': PlayMode.STOPPED}
         
-        # A. Stop Loss / Ratchet Floor
-        if state.session_pnl <= state.locked_profit or state.session_pnl <= stop_limit:
-            return {'bet_amount': 0, 'reason': "STOP LOSS / RATCHET HIT", 'mode': PlayMode.STOPPED}
-        
-        # B. THE COLOR UP RULE (Dynamic based on Mode)
-        # If Ratchet is ON, we rely on the specific Mode's cap.
-        # If Ratchet is OFF, we rely on the Slider Target.
+        # --- 2. COLOR UP CHECK ---
         if state.overrides and state.overrides.ratchet_enabled:
             mode = state.overrides.ratchet_mode
-            cap_u = 20 # Default Standard
-            
+            cap_u = 20 # Standard
             if mode == "Sprint": cap_u = 15
             elif mode == "Deep Stack": cap_u = 40
+            # Gold Grinder is also 20u cap
             
             if state.session_pnl >= (base_unit * cap_u):
                 return {'bet_amount': 0, 'reason': f"COLOR UP! ({mode} +{cap_u}u)", 'mode': PlayMode.STOPPED}
         
         elif state.session_pnl >= profit_target:
-             # Ratchet OFF - Standard Slider Target
              return {'bet_amount': 0, 'reason': "PROFIT TARGET SECURED", 'mode': PlayMode.STOPPED}
 
-        # C. Last Shoe Survival Rule
+        # --- 3. FINAL SHOE SURVIVAL ---
         if state.current_shoe == shoes_max:
             s3_trigger = base_unit * (state.overrides.shoe3_survival_trigger if state.overrides else 5)
             s3_drop = base_unit * (state.overrides.shoe3_drop_limit if state.overrides else 1)
@@ -153,11 +156,11 @@ class BaccaratStrategist:
                 base_unit = state.tier.base_unit 
                 press_unit = state.tier.base_unit
 
-        # WATCHER (IRON GATE)
+        # WATCHER
         if state.mode == PlayMode.WATCHER:
             return {'bet_amount': 0, 'reason': "IRON GATE: Watching", 'mode': PlayMode.WATCHER}
 
-        # --- 3. ACTIVE BETTING LOGIC ---
+        # ACTIVE PLAY
         bet = base_unit
         reason = "Base Bet"
 
@@ -170,7 +173,6 @@ class BaccaratStrategist:
         # Press Logic
         max_depth = state.overrides.press_depth if state.overrides else 3
         trigger_wins = state.overrides.press_trigger_wins if state.overrides else 2
-        
         can_press = (state.current_press_streak < max_depth) or (max_depth == 0)
         
         if trigger_wins > 0 and state.consecutive_wins >= trigger_wins and can_press:
@@ -181,15 +183,12 @@ class BaccaratStrategist:
 
     @staticmethod
     def update_state_after_hand(state: SessionState, won: bool, amount_won: float):
-        """
-        Updates PnL, Streaks, Ratchets, and Modes after a hand result.
-        """
         state.session_pnl += amount_won
         state.shoe_pnls[state.current_shoe] += amount_won
         state.hands_played_in_shoe += 1
         state.hands_played_total += 1
         
-        # --- NEW DYNAMIC RATCHET LADDER LOGIC ---
+        # --- RATCHET UPDATE ---
         if state.session_pnl > state.peak_session_pnl:
             state.peak_session_pnl = state.session_pnl
             
@@ -198,25 +197,20 @@ class BaccaratStrategist:
                 current_u = state.peak_session_pnl / base
                 mode = state.overrides.ratchet_mode
                 
-                new_lock = state.locked_profit # Start with current lock
+                new_lock = state.locked_profit
                 
-                # --- MODE 1: SPRINT (Short / Aggressive Lock) ---
+                # Logic Trees
                 if mode == "Sprint":
-                    # Cap is 15u (Handled in get_next_decision)
                     if current_u >= 12: new_lock = max(new_lock, 8 * base)
                     elif current_u >= 9: new_lock = max(new_lock, 5 * base)
                     elif current_u >= 6: new_lock = max(new_lock, 3 * base)
 
-                # --- MODE 2: STANDARD (Balanced) ---
-                elif mode == "Standard":
-                    # Cap is 20u
+                elif mode in ["Standard", "Gold Grinder"]: # Gold Grinder uses Standard Ladders
                     if current_u >= 16: new_lock = max(new_lock, 7 * base)
                     elif current_u >= 12: new_lock = max(new_lock, 5 * base)
                     elif current_u >= 8: new_lock = max(new_lock, 3 * base)
 
-                # --- MODE 3: DEEP STACK (Long Haul) ---
                 elif mode == "Deep Stack":
-                    # Cap is 40u
                     if current_u >= 25: new_lock = max(new_lock, 15 * base)
                     elif current_u >= 15: new_lock = max(new_lock, 8 * base)
                     elif current_u >= 10: new_lock = max(new_lock, 4 * base)
@@ -236,15 +230,12 @@ class BaccaratStrategist:
         if won:
             state.consecutive_wins += 1
             state.consecutive_losses = 0
-            if state.penalty_cooldown > 0:
-                state.penalty_cooldown -= 1
-            if amount_won > state.tier.base_unit:
-                state.current_press_streak += 1
+            if state.penalty_cooldown > 0: state.penalty_cooldown -= 1
+            if amount_won > state.tier.base_unit: state.current_press_streak += 1
         else:
             state.consecutive_losses += 1
             state.consecutive_wins = 0
             state.current_press_streak = 0 
-            
             limit = state.overrides.iron_gate_limit if state.overrides else 3
             if state.consecutive_losses >= limit:
                 state.mode = PlayMode.WATCHER
