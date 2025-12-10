@@ -808,7 +808,7 @@ def show_simulator():
                          switch_ratchet = ui.switch('Ratchet').props('color=gold')
                          with ui.column():
                              ui.label('Mode').classes('text-xs text-yellow-400')
-                             select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack'], value='Standard').props('dense options-dense').classes('w-32')
+                             select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
 
                     ui.label('Status Target').classes('text-xs text-yellow-400 mt-2')
                     select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').classes('w-full')
