@@ -8,7 +8,7 @@ import json
 
 # Internal Imports
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
-# CRITICAL FIX: Removed TIER_MAP from this import line
+# CRITICAL: TIER_MAP removed to prevent import errors
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
 
@@ -336,6 +336,7 @@ def show_simulator():
 
     def update_ladder_preview():
         factor = slider_safety.value
+        # Check if Tier 2 Cap is active
         max_t = 2 if switch_cap_tier2.value else 0
         t_map = generate_tier_map(factor, max_tier_cap=max_t)
         
@@ -827,9 +828,9 @@ def show_simulator():
                      with ui.row().classes('w-full justify-between'):
                         ui.label('Starting Capital').classes('text-xs text-green-400')
                         lbl_start_ga = ui.label()
-                     slider_start_ga = ui.slider(min=1000, max=3000, step=100, value=2000).props('color=green')
+                     slider_start_ga = ui.slider(min=1000, max=10000, value=5000, step=100).props('color=green') # UPDATED MAX
                      lbl_start_ga.bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
-                     lbl_start_ga.set_text('€2000')
+                     lbl_start_ga.set_text('€5000')
                 
                 btn_sim = ui.button('RUN STATUS SIM', on_click=run_sim).props('icon=verified color=yellow text-color=black size=lg')
         
