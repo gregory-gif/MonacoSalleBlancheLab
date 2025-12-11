@@ -20,7 +20,6 @@ SBM_TIERS = {
 class SimulationWorker:
     @staticmethod
     def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool = False, penalty_mode: bool = False, active_level: int = 1, mode: str = 'Standard'):
-        # CRITICAL: Sending 'mode' instead of cap boolean
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode)
         
         # --- PENALTY BOX LOGIC ---
@@ -98,13 +97,10 @@ class SimulationWorker:
                         use_tax, use_holiday, safety_factor, target_points, earn_rate,
                         holiday_ceiling, insolvency_floor, strategy_mode):
         
-        # GENERATE MAP (Sends mode, not max_tier_cap)
         tier_map = generate_tier_map(safety_factor, mode=strategy_mode)
-        
         trajectory = []
         current_ga = start_ga
         
-        # State Tracking
         active_level = 1 
         initial_tier = get_tier_for_ga(current_ga, tier_map, 1, strategy_mode)
         active_level = initial_tier.level
@@ -354,9 +350,12 @@ def show_simulator():
         insolvency_pct = (avg_insolvent / total_months) * 100
         y1_failures = len([r for r in results if r['failed_y1']])
         y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
+        active_pct = 100 - insolvency_pct
         
         total_input = start_ga + np.mean([r['contrib'] for r in results])
         total_output = avg_final_ga + avg_tax
+        grand_total_wealth = total_output
+        net_life_result = total_output - total_input
         net_cost = total_input - total_output
         real_monthly_cost = net_cost / total_months
         
@@ -402,7 +401,8 @@ def show_simulator():
                             if gold_prob > 0: ui.label(f"Year {avg_year_hit:.1f}").classes('text-[10px] text-slate-500')
                         with ui.column().classes('items-center'):
                             ui.label('Year 1 Survival').classes('text-[10px] text-slate-500 uppercase')
-                            ui.label(f"{y1_survival_rate:.1f}%").classes(f'text-2xl font-bold {"text-green-400" if y1_survival_rate==100 else "text-red-400"}')
+                            y1_color = 'text-green-400' if y1_survival_rate == 100 else 'text-red-400'
+                            ui.label(f"{y1_survival_rate:.1f}%").classes(f'text-2xl font-bold {y1_color}')
                         with ui.column().classes('items-center'):
                             ui.label('Cost Effic.').classes('text-[10px] text-slate-500 uppercase')
                             ui.label(f"{score_cost:.0f}%").classes('text-2xl font-bold text-green-400')
@@ -433,6 +433,19 @@ def show_simulator():
                 lines.append(" - Drop back to Tier 2 only if < €3,500")
             elif config['strategy_mode'] == 'Fortress':
                 lines.append("FORTRESS MODE: Active (Cap @ 100)")
+            
+            lines.append("\n=== PERFORMANCE RESULTS ===")
+            lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
+            lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
+            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
+            if avg_tax > 0:
+                lines.append(f"   -> Final GA: €{avg_final_ga:,.0f}")
+                lines.append(f"   -> Tax Withdrawn: €{avg_tax:,.0f}")
+            lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
+            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f} (incl. Tax withdrawals)")
+            lines.append(f"Active Play Time: {active_pct:.1f}%")
+            lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
+
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
     # --- MAIN UI ---
