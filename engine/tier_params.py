@@ -12,7 +12,7 @@ class TierConfig:
     catastrophic_cap: float
 
 # --- BETTING ENGINE MODES ---
-# 1. STANDARD: Safe, Exponential Growth (50->100->200...)
+# 1. STANDARD: Safe, Exponential Growth
 # 2. FORTRESS: Aggressive 100 start (2000 threshold)
 # 3. TITAN: High Roller Hysteresis (150/250 push)
 
@@ -29,7 +29,7 @@ def generate_tier_map(safety_factor: int = 25, mode: str = 'Standard') -> dict:
         )
         # Tier 2: The Floor (Between €2,000 and €5,000) -> Bet €100 / Press €150
         tiers[2] = TierConfig(
-            level=2, min_ga=2000, max_ga=float('inf'), # Max determined by logic
+            level=2, min_ga=2000, max_ga=float('inf'),
             base_unit=100.0, press_unit=150.0, # Custom Press
             stop_loss=-(100.0*10), profit_lock=100.0*6, catastrophic_cap=-(100.0*20)
         )
@@ -81,21 +81,19 @@ def get_tier_for_ga(current_ga: float, tier_map: dict = None, active_level: int 
     # --- TITAN HYSTERESIS LOGIC ---
     if mode == 'Titan':
         # 1. UPGRADE CHECK
-        # If we are below Tier 3, can we go up?
         if active_level < 3:
             if current_ga >= 5000: return tier_map[3] # Cross 5k -> Tier 3
             if current_ga >= 2000: return tier_map[2] # Cross 2k -> Tier 2
             return tier_map[1] # Else Tier 1
 
         # 2. DOWNGRADE CHECK (Sticky)
-        # If we are AT Tier 3, we hold it until we crash below 3500
         if active_level == 3:
             if current_ga < 3500: return tier_map[2] # Crash 3.5k -> Drop to 2
             return tier_map[3] # Stay at 3 (Buffer Zone)
             
         return tier_map[active_level] # Fallback
 
-    # --- FORTRESS LOGIC (Hard Floors) ---
+    # --- FORTRESS LOGIC ---
     if mode == 'Fortress':
         if current_ga >= 2000: return tier_map[2]
         return tier_map[1]
