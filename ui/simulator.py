@@ -568,8 +568,8 @@ def show_simulator():
 
     # --- MAIN UI ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
-        # TITLE CHANGE: v2.4 (PURPLE) to confirm update
-        ui.label('RESEARCH LAB v2.4 (PRESS OPTION)').classes('text-2xl font-light text-purple-300')
+        # TITLE CHANGE: v2.5 (FINAL FIXED)
+        ui.label('RESEARCH LAB v2.5 (SAFE TITAN)').classes('text-2xl font-light text-blue-300')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
             
@@ -618,7 +618,8 @@ def show_simulator():
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     
-                    select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
+                    # UPDATED MODE SELECTION
+                    select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
                     with ui.row().classes('w-full justify-between'):
                         ui.label('Safety Buffer').classes('text-xs text-orange-400'); lbl_safe = ui.label()
