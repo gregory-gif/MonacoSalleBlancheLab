@@ -26,7 +26,8 @@ class SimulationWorker:
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         
         if is_active_penalty:
-            flat_bet = 100 if current_ga >= 2000 else 50
+            # ADAPTATION: If min bet is €100 (Monaco), we stick to that if possible
+            flat_bet = 100 if current_ga >= 2000 else 50 
             tier = TierConfig(
                 level=tier.level, min_ga=0, max_ga=9999999,
                 base_unit=flat_bet, press_unit=flat_bet, 
@@ -89,13 +90,15 @@ class SimulationWorker:
                 state.current_press_streak = 0
                 if state.current_shoe == overrides.shoes_per_session: state.shoe3_start_pnl = state.session_pnl
 
-        return state.session_pnl, volume, tier.level
+        # Return 4 values: PnL, Volume, Tier Level, Hands Played
+        return state.session_pnl, volume, tier.level, state.hands_played_total
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
                         contrib_win, contrib_loss, overrides, use_ratchet,
                         use_tax, use_holiday, safety_factor, target_points, earn_rate,
-                        holiday_ceiling, insolvency_floor, strategy_mode):
+                        holiday_ceiling, insolvency_floor, strategy_mode,
+                        track_y1_details=False):
         
         tier_map = generate_tier_map(safety_factor, mode=strategy_mode)
         trajectory = []
@@ -110,15 +113,20 @@ class SimulationWorker:
         gold_hit_year = -1; current_year_points = 0; failed_year_one = False
         last_session_won = False
         
+        # Flight Recorder Log
+        y1_log = []
+
         for m in range(total_months):
             if m > 0 and m % 12 == 0: current_year_points = 0
 
+            # Tax
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
                 tax = surplus * (overrides.tax_rate / 100.0)
                 current_ga -= tax
                 m_tax += tax
 
+            # Contribution
             should_contribute = True
             if use_holiday and current_ga >= holiday_ceiling: should_contribute = False
             
@@ -141,7 +149,8 @@ class SimulationWorker:
                 for _ in range(sessions_this_month):
                     is_penalty = False 
                     
-                    pnl, vol, used_level = SimulationWorker.run_session(
+                    # Unpack 4 values
+                    pnl, vol, used_level, hands = SimulationWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         penalty_mode=is_penalty, active_level=active_level, mode=strategy_mode
                     )
@@ -152,7 +161,25 @@ class SimulationWorker:
                     m_total_volume += vol
                     last_session_won = (pnl > 0)
                     current_year_points += vol * (earn_rate / 100)
-            
+                    
+                    # CAPTURE DATA FOR YEAR 1 (First 12 months)
+                    if track_y1_details and m < 12:
+                        y1_log.append({
+                            'month': m + 1,
+                            'result': pnl,
+                            'balance': current_ga,
+                            'hands': hands
+                        })
+            else:
+                 if track_y1_details and m < 12:
+                        y1_log.append({
+                            'month': m + 1,
+                            'result': 0,
+                            'balance': current_ga,
+                            'hands': 0,
+                            'note': 'Insolvent/Holiday'
+                        })
+
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
             
@@ -162,7 +189,8 @@ class SimulationWorker:
             'trajectory': trajectory, 'final_ga': current_ga, 'contrib': m_contrib,
             'tax': m_tax, 'play_pnl': m_play_pnl, 'holidays': m_holidays,
             'insolvent_months': m_insolvent_months, 'total_volume': m_total_volume,
-            'gold_year': gold_hit_year, 'failed_y1': failed_year_one
+            'gold_year': gold_hit_year, 'failed_y1': failed_year_one,
+            'y1_log': y1_log 
         }
 
 def show_simulator():
@@ -257,7 +285,7 @@ def show_simulator():
             if t.min_ga == float('inf'): continue
             risk_pct = 0 if t.min_ga == 0 else (t.base_unit / t.min_ga) * 100
             start_str = f"€{t.min_ga:,.0f}"
-            if mode == 'Titan' and level == 3: start_str = "€5,000 (Drop < €3,500)"
+            if mode == 'Titan' and level == 3: start_str = "€5,000 (Drop < €4,500)"
             
             rows.append({
                 'tier': f"Tier {level}",
@@ -303,13 +331,15 @@ def show_simulator():
                 count = min(batch_size, config['num_sims'] - i)
                 def run_batch_careers():
                     batch_data = []
-                    for _ in range(count):
+                    for k in range(count):
+                        should_track = (i == 0 and k == 0) # Track only first sim
                         res = SimulationWorker.run_full_career(
                             start_ga, config['years']*12, config['freq'],
                             config['contrib_win'], config['contrib_loss'], overrides, 
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
-                            config['hol_ceil'], config['insolvency'], config['strategy_mode']
+                            config['hol_ceil'], config['insolvency'], config['strategy_mode'],
+                            track_y1_details=should_track
                         )
                         batch_data.append(res)
                     return batch_data
@@ -332,6 +362,7 @@ def show_simulator():
     def render_analysis(results, config, start_ga, overrides):
         if not results: return
         
+        # --- METRICS CALCULATIONS ---
         trajectories = np.array([r['trajectory'] for r in results])
         months = list(range(trajectories.shape[1]))
         min_band = np.min(trajectories, axis=0); max_band = np.max(trajectories, axis=0)
@@ -341,29 +372,24 @@ def show_simulator():
         avg_final_ga = np.mean([r['final_ga'] for r in results])
         avg_tax = np.mean([r['tax'] for r in results])
         avg_insolvent = np.mean([r['insolvent_months'] for r in results])
-        
         gold_hits = [r['gold_year'] for r in results if r['gold_year'] != -1]
         gold_prob = (len(gold_hits) / len(results)) * 100
         avg_year_hit = np.mean(gold_hits) if gold_hits else 0
-        
         total_months = config['years'] * 12
         insolvency_pct = (avg_insolvent / total_months) * 100
         y1_failures = len([r for r in results if r['failed_y1']])
         y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
         active_pct = 100 - insolvency_pct
-        
         total_input = start_ga + np.mean([r['contrib'] for r in results])
         total_output = avg_final_ga + avg_tax
         grand_total_wealth = total_output
         net_life_result = total_output - total_input
         net_cost = total_input - total_output
         real_monthly_cost = net_cost / total_months
-        
         survivor_count = len([r for r in results if r['final_ga'] >= 1500])
         score_survival = (survivor_count / len(results)) * 100
         if real_monthly_cost <= 0: score_cost = 100
         else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
-        
         total_score = (gold_prob * 0.30) + (score_survival * 0.30) + (score_cost * 0.20) + ((100-insolvency_pct) * 0.20)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
         elif total_score >= 80: grade, g_col = "B", "text-blue-400"
@@ -371,6 +397,7 @@ def show_simulator():
         elif total_score >= 60: grade, g_col = "D", "text-orange-400"
         else: grade, g_col = "F", "text-red-600"
 
+        # --- SCOREBOARD ---
         with scoreboard_container:
             scoreboard_container.clear()
             with ui.card().classes('w-full bg-slate-800 p-4 border-l-8').style(f'border-color: {"#ef4444" if grade=="F" else "#4ade80"}'):
@@ -392,7 +419,6 @@ def show_simulator():
                             ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             ui.label(f"€{total_output:,.0f}").classes('text-4xl font-black text-white leading-none')
                             if avg_tax > 0: ui.label(f"(GA €{avg_final_ga:,.0f} + Tax €{avg_tax:,.0f})").classes('text-xs font-bold text-yellow-400')
-
                     ui.separator().classes('bg-slate-700')
                     with ui.grid(columns=4).classes('w-full gap-4'):
                         with ui.column().classes('items-center'):
@@ -410,6 +436,7 @@ def show_simulator():
                             ui.label('Total Survival').classes('text-[10px] text-slate-500 uppercase')
                             ui.label(f"{score_survival:.0f}%").classes('text-2xl font-bold text-blue-400')
 
+        # --- CHART ---
         with chart_container:
             chart_container.clear()
             fig = go.Figure()
@@ -421,6 +448,41 @@ def show_simulator():
             fig.update_layout(title='Monte Carlo Confidence Bands', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20), xaxis=dict(title='Months Passed', gridcolor='#334155'), yaxis=dict(title='Game Account (€)', gridcolor='#334155'), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             ui.plotly(fig).classes('w-full h-96')
 
+        # --- FLIGHT RECORDER CONTAINER (DEDICATED) ---
+        with flight_recorder_container:
+            flight_recorder_container.clear()
+            
+            y1_log = results[0].get('y1_log', [])
+            
+            # TITLE + EXPANSION
+            with ui.expansion('YEAR 1 FLIGHT RECORDER (Sim #1)', icon='flight_takeoff', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+                if y1_log:
+                    ui.label("Detailing the first 12 months of Universe #1").classes('text-xs text-slate-400 p-2')
+                    table_rows = []
+                    for entry in y1_log:
+                        res_val = entry.get('result', 0)
+                        # We use 'text-green-400' / 'text-red-400' string literals for aggrid cell class if needed
+                        table_rows.append({
+                            'Month': f"M{entry.get('month', '?')}",
+                            'Result': f"€{res_val:+,.0f}",
+                            'Balance': f"€{entry.get('balance', 0):,.0f}",
+                            'Hands': f"{entry.get('hands', 0)}"
+                        })
+                    
+                    ui.aggrid({
+                        'columnDefs': [
+                            {'headerName': 'Mo', 'field': 'Month', 'width': 70},
+                            {'headerName': 'Result', 'field': 'Result', 'width': 100, 'cellClass': "font-bold"},
+                            {'headerName': 'Balance', 'field': 'Balance', 'width': 100},
+                            {'headerName': 'Hands', 'field': 'Hands', 'width': 90},
+                        ],
+                        'rowData': table_rows,
+                        'domLayout': 'autoHeight',
+                    }).classes('w-full theme-balham-dark')
+                else:
+                    ui.label("⚠️ NO DATA: PLEASE RESTART PYTHON SCRIPT").classes('text-red-400 font-bold p-4')
+
+        # --- REPORT CONTAINER ---
         with report_container:
             report_container.clear()
             lines = ["=== CONFIGURATION ==="]
@@ -430,7 +492,7 @@ def show_simulator():
             if config['strategy_mode'] == 'Titan':
                 lines.append("TITAN HYSTERESIS: Active")
                 lines.append(" - Tier 2 (100/150) -> Tier 3 (150/250) @ €5,000")
-                lines.append(" - Drop back to Tier 2 only if < €3,500")
+                lines.append(" - Drop back to Tier 2 only if < €4,500")
             elif config['strategy_mode'] == 'Fortress':
                 lines.append("FORTRESS MODE: Active (Cap @ 100)")
             
@@ -438,11 +500,8 @@ def show_simulator():
             lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
             lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
-            if avg_tax > 0:
-                lines.append(f"   -> Final GA: €{avg_final_ga:,.0f}")
-                lines.append(f"   -> Tax Withdrawn: €{avg_tax:,.0f}")
             lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
-            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f} (incl. Tax withdrawals)")
+            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
 
@@ -450,7 +509,9 @@ def show_simulator():
 
     # --- MAIN UI ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
-        ui.label('RESEARCH LAB: MY MONTE-CARLO').classes('text-2xl font-light text-slate-300')
+        # TITLE CHANGE: v2.1 to confirm update
+        ui.label('RESEARCH LAB v2.1 (RED)').classes('text-2xl font-light text-red-400')
+        
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
             
             # Library Panel
@@ -527,7 +588,8 @@ def show_simulator():
                     select_bet_strat = ui.select(['Banker', 'Player'], value='Banker', label='Bet Strategy').classes('w-full')
                     slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes')
                     
-                    slider_stop_loss = ui.slider(min=5, max=50, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
+                    # UPDATED: STOP LOSS FROM 0 to 50
+                    slider_stop_loss = ui.slider(min=0, max=50, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=3, max=50, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     
                     with ui.row().classes('items-center justify-between'):
@@ -559,6 +621,10 @@ def show_simulator():
         progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        
+        # VISIBLE CONTAINER
+        flight_recorder_container = ui.column().classes('w-full mb-4')
+        
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
