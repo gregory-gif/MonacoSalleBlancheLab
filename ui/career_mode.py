@@ -359,9 +359,9 @@ def show_career_mode():
                 slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
                 slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
                 
-                # NEW SLIDER FOR MULTIVERSE
+                # NEW SLIDER FOR MULTIVERSE - UPDATED to 1000
                 ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
-                slider_num_sims = ui.slider(min=10, max=100, value=20).props('color=cyan')
+                slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
                 ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
                 
                 ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
