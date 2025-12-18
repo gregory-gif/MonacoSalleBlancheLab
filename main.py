@@ -1,5 +1,5 @@
 from nicegui import ui
-from ui.scorecard import scorecard # <--- FIXED: Lowercase import based on error log
+from ui.scorecard import show_scorecard # <--- FIXED IMPORT
 from ui.dashboard import show_dashboard
 from ui.simulator import show_simulator
 from ui.session_log import show_session_log
@@ -14,7 +14,7 @@ content = ui.column().classes('w-full items-center')
 def load_cockpit():
     content.clear()
     with content:
-        scorecard() # <--- FIXED: Calling the function, not a class
+        show_scorecard() # <--- FIXED FUNCTION CALL
 
 def load_dashboard():
     content.clear()
