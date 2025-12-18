@@ -79,14 +79,19 @@ class RouletteWorker:
         active_level = initial_tier.level
 
         m_insolvent_months = 0; failed_year_one = False
+        m_tax = 0 # Track tax
+        m_contrib = 0
+        
         y1_log = []
         last_session_won = False
 
         for m in range(total_months):
-            # Tax
+            # Tax Logic (Fixed to track amount)
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
-                current_ga -= surplus * (overrides.tax_rate / 100.0)
+                tax_amt = surplus * (overrides.tax_rate / 100.0)
+                current_ga -= tax_amt
+                m_tax += tax_amt
 
             # Contribution
             should_contribute = True
@@ -95,6 +100,7 @@ class RouletteWorker:
             if should_contribute:
                 amount = contrib_win if last_session_won else contrib_loss
                 current_ga += amount
+                m_contrib += amount
             
             # Insolvency
             can_play = (current_ga >= insolvency_floor)
@@ -124,10 +130,10 @@ class RouletteWorker:
 
             trajectory.append(current_ga)
             
-        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': 0, 'contrib': 0, 'gold_year': -1, 'total_volume': 0}
+        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': -1, 'total_volume': 0}
 
 def show_roulette_sim():
-    # STATE (Defined here for correct scope)
+    # SCOPE FIX: Define running here
     running = False 
     
     def load_saved_strategies():
@@ -237,7 +243,7 @@ def show_roulette_sim():
             ladder_grid.options['rowData'] = rows
             ladder_grid.update()
         except Exception as e:
-            pass # Silent fail to prevent UI crash
+            pass 
 
     # --- QUICK REFRESH ---
     async def refresh_single_universe():
@@ -354,6 +360,9 @@ def show_roulette_sim():
         mean_line = np.mean(trajectories, axis=0); median_line = np.median(trajectories, axis=0)
         
         avg_final_ga = np.mean([r['final_ga'] for r in results])
+        # FIXED: Define avg_tax
+        avg_tax = np.mean([r['tax'] for r in results])
+        
         avg_insolvent = np.mean([r['insolvent_months'] for r in results])
         total_months = config['years'] * 12
         insolvency_pct = (avg_insolvent / total_months) * 100
@@ -370,7 +379,6 @@ def show_roulette_sim():
         if real_monthly_cost <= 0: score_cost = 100
         else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
         
-        # Simplified scoring for Roulette
         total_score = (score_survival * 0.70) + (active_pct * 0.30)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
         elif total_score >= 80: grade, g_col = "B", "text-blue-400"
