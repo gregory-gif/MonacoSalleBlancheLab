@@ -69,17 +69,22 @@ class RouletteStrategist:
         # --- NEW OPTION 4: CAPPED D'ALEMBERT ---
         if press_mode == 4:
             # state.dalembert_level represents steps above base.
-            # 0 = €5, 1 = €10, 2 = €15, 3 = €20, 4 = €25 (Cap)
+            # Step size = 1 Base Unit
             
-            # Calculate current bet based on level
-            bet = base_val + (state.dalembert_level * 5.0)
+            # Dynamic Step Calculation
+            step_size = base_val
+            bet = base_val + (state.dalembert_level * step_size)
             
-            # Safety Clamp (Just in case logic drifts)
-            if bet < 5.0: bet = 5.0
-            if bet > 25.0: bet = 25.0
+            # Cap at 5 Units (Base + 4 steps)
+            # Example: Base €10. Steps €10. Max Bet €50.
+            max_bet = base_val * 5.0
+            
+            # Safety Clamp
+            if bet < base_val: bet = base_val
+            if bet > max_bet: bet = max_bet
             
         # --- EXISTING POSITIVE PROGRESSIONS ---
-        elif press_mode == 3: # Progression 1-1.5-2.5 (Titan Baccarat Style)
+        elif press_mode == 3: # Progression 1-1.5-2.5 (Titan Style)
             if state.current_press_streak == 1: bet = base_val * 1.5
             elif state.current_press_streak >= 2: bet = base_val * 2.5
             if state.consecutive_losses >= state.overrides.iron_gate_limit: state.current_press_streak = 0
@@ -119,12 +124,12 @@ class RouletteStrategist:
         # D'ALEMBERT LOGIC UPDATER
         if state.overrides.press_trigger_wins == 4:
             if won:
-                # Win: Remove 1 Unit (decrease level)
+                # Win: Decrease level
                 if state.dalembert_level > 0:
                     state.dalembert_level -= 1
             else:
-                # Lose: Add 1 Unit (increase level)
-                # CRITICAL RULE: If at Cap (€25 = Level 4) and Lose, RESET to Floor.
+                # Lose: Increase level
+                # CRITICAL RULE: If at Cap (Level 4) and Lose, RESET to Floor.
                 if state.dalembert_level >= 4:
                     state.dalembert_level = 0 # The Reset
                 else:
