@@ -11,30 +11,36 @@ class TierConfig:
     profit_lock: float
     catastrophic_cap: float
 
-# --- TIER GENERATION (Supports Baccarat €100 & Roulette €5) ---
+# --- TIER GENERATION (Supports Dynamic Base Bets) ---
 
-def generate_tier_map(safety_factor: int = 25, mode: str = 'Standard', game_type: str = 'Baccarat') -> dict:
+def generate_tier_map(safety_factor: int = 25, mode: str = 'Standard', game_type: str = 'Baccarat', base_bet: float = None) -> dict:
     tiers = {}
     
     # 1. DETERMINE BASE UNIT
-    if game_type == 'Roulette':
-        BASE_BET_T1 = 5.0 # Monaco Roulette Min
+    if base_bet is not None and base_bet > 0:
+        BASE_BET_T1 = base_bet
     else:
-        BASE_BET_T1 = 100.0 # Monaco Baccarat Min
+        if game_type == 'Roulette':
+            BASE_BET_T1 = 5.0 # Monaco Roulette Min
+        else:
+            BASE_BET_T1 = 100.0 # Monaco Baccarat Min
 
     # --- SAFE TITAN / TITAN LOGIC ---
     if mode == 'Safe Titan' or mode == 'Titan':
-        # Roulette Titan: 5 -> 10 -> 20
-        # Baccarat Titan: 100 -> 150 -> 250
         
         if game_type == 'Roulette':
-            t1_base, t1_press = 5.0, 5.0   # 5 -> 10
-            t2_base, t2_press = 10.0, 10.0 # 10 -> 20
-            t3_base, t3_press = 20.0, 20.0 # 20 -> 40
-            # Thresholds scaled by ~20x less
-            th_low = 1000.0
-            th_high = 2500.0
+            # Roulette Titan scales with Base Bet
+            # e.g., Base 5: 5 -> 10 -> 20
+            # e.g., Base 10: 10 -> 20 -> 40
+            t1_base, t1_press = BASE_BET_T1, BASE_BET_T1
+            t2_base, t2_press = BASE_BET_T1 * 2, BASE_BET_T1 * 2
+            t3_base, t3_press = BASE_BET_T1 * 4, BASE_BET_T1 * 4
+            
+            # Thresholds: roughly 200x base for low, 500x base for high
+            th_low = BASE_BET_T1 * 200
+            th_high = BASE_BET_T1 * 500
         else:
+            # Baccarat Defaults (keeping existing logic for safety)
             t1_base, t1_press = 100.0, 100.0
             t2_base, t2_press = 100.0, 150.0
             t3_base, t3_press = 150.0, 250.0
@@ -48,7 +54,7 @@ def generate_tier_map(safety_factor: int = 25, mode: str = 'Standard', game_type
             stop_loss=-(t1_base*10), profit_lock=t1_base*6, catastrophic_cap=-(t1_base*20)
         )
         
-        if mode == 'Safe Titan': return tiers # Stop here for Safe Titan
+        if mode == 'Safe Titan': return tiers 
 
         # Tier 2 (Standard)
         tiers[2] = TierConfig(
@@ -68,7 +74,7 @@ def generate_tier_map(safety_factor: int = 25, mode: str = 'Standard', game_type
     # --- FORTRESS LOGIC ---
     if mode == 'Fortress':
         # Flat betting only
-        th_low = 1000.0 if game_type == 'Roulette' else 2000.0
+        th_low = BASE_BET_T1 * 200
         
         tiers[1] = TierConfig(
             level=1, min_ga=0, max_ga=th_low,
@@ -77,7 +83,7 @@ def generate_tier_map(safety_factor: int = 25, mode: str = 'Standard', game_type
         )
         tiers[2] = TierConfig(
             level=2, min_ga=th_low, max_ga=float('inf'),
-            base_unit=BASE_BET_T1, press_unit=BASE_BET_T1, # No upgrade, just safety
+            base_unit=BASE_BET_T1, press_unit=BASE_BET_T1, 
             stop_loss=-(BASE_BET_T1*10), profit_lock=BASE_BET_T1*6, catastrophic_cap=-(BASE_BET_T1*20)
         )
         return tiers
@@ -106,23 +112,31 @@ def get_tier_for_ga(current_ga: float, tier_map: dict = None, active_level: int 
 
     # --- TITAN HYSTERESIS ---
     if mode == 'Titan':
-        th_low = 1000.0 if game_type == 'Roulette' else 2000.0
-        th_high = 2500.0 if game_type == 'Roulette' else 5000.0
-        th_drop = 2250.0 if game_type == 'Roulette' else 4500.0
+        # Get thresholds dynamically from the generated map to respect Base Bet scaling
+        # Tier 2 starts at min_ga of Tier 2
+        t2 = tier_map.get(2)
+        t3 = tier_map.get(3)
         
-        if active_level < 3:
-            if current_ga >= th_high: return tier_map[3]
-            if current_ga >= th_low: return tier_map[2]
-            return tier_map[1] 
-        if active_level == 3:
-            if current_ga < th_drop: return tier_map[2]
-            return tier_map[3]
+        if t2 and t3:
+            th_low = t2.min_ga
+            th_high = t3.min_ga
+            # Hysteresis drop is usually 10% below the threshold
+            th_drop = th_high * 0.9 
+            
+            if active_level < 3:
+                if current_ga >= th_high: return tier_map[3]
+                if current_ga >= th_low: return tier_map[2]
+                return tier_map[1] 
+            if active_level == 3:
+                if current_ga < th_drop: return tier_map[2]
+                return tier_map[3]
+        
         return tier_map[active_level] 
 
     # --- FORTRESS ---
     if mode == 'Fortress':
-        th_low = 1000.0 if game_type == 'Roulette' else 2000.0
-        if current_ga >= th_low: return tier_map[2]
+        t2 = tier_map.get(2)
+        if t2 and current_ga >= t2.min_ga: return tier_map[2]
         return tier_map[1]
 
     # --- STANDARD ---
