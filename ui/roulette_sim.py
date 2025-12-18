@@ -5,16 +5,16 @@ import asyncio
 import traceback
 import numpy as np
 
-# Import Roulette Physics
+# Import Physics
 from engine.roulette_rules import RouletteSessionState, RouletteStrategist, RouletteBet
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
-from engine.strategy_rules import StrategyOverrides, PlayMode # Re-using data structures
+from engine.strategy_rules import StrategyOverrides
 
-# SBM LOYALTY TIERS (Same for Roulette)
+# SBM LOYALTY TIERS
 SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
-# Map String Selection to Enum
+# MAP
 BET_MAP = {
     'Red': RouletteBet.RED,
     'Black': RouletteBet.BLACK,
@@ -27,19 +27,12 @@ BET_MAP = {
 class RouletteWorker:
     @staticmethod
     def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str):
-        # 1. Get Tier (Roulette Context)
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Roulette')
         
-        # 2. Penalty Box Logic (Monaco Roulette Specifics)
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
-            flat_bet = 5.0 # Monaco Roulette Min is €5 (not €100)
-            tier = TierConfig(
-                level=tier.level, min_ga=0, max_ga=9999999,
-                base_unit=flat_bet, press_unit=flat_bet, 
-                stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap
-            )
-            # Force flat betting in penalty
+            flat_bet = 5.0 # Monaco Roulette Min
+            tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
                 profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
@@ -48,34 +41,24 @@ class RouletteWorker:
         else:
             session_overrides = overrides
 
-        # 3. Ratchet Setup
         if use_ratchet and not is_active_penalty:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
-        # 4. Initialize State
         state = RouletteSessionState(tier=tier, overrides=session_overrides)
         state.current_spin = 1
-        
-        # Define "Session Length" (e.g. 60 spins = 1 hour/shoe equivalent)
         spins_limit = overrides.shoes_per_session * 60 
         volume = 0
         
         while state.current_spin <= spins_limit and state.mode != 'STOPPED':
-            # A. Get Decision
             decision = RouletteStrategist.get_next_decision(state)
             if decision['mode'] == 'STOPPED': break
             
             bet_amt = decision['bet']
             volume += bet_amt
             
-            # B. Physics (Spin the Wheel)
-            # We map the generic 'bet_strategy' string to the actual Enum
             bet_enum = BET_MAP.get(overrides.bet_strategy, RouletteBet.RED)
-            
-            # Resolve Spin (Updates state internally)
             number, won, pnl = RouletteStrategist.resolve_spin(state, bet_enum, bet_amt)
-            
             state.current_spin += 1
 
         return state.session_pnl, volume, tier.level, state.current_spin
@@ -87,9 +70,7 @@ class RouletteWorker:
                         holiday_ceiling, insolvency_floor, strategy_mode,
                         track_y1_details=False):
         
-        # GENERATE TIER MAP FOR ROULETTE
         tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Roulette')
-        
         trajectory = []
         current_ga = start_ga
         running_play_pnl = 0
@@ -97,21 +78,15 @@ class RouletteWorker:
         initial_tier = get_tier_for_ga(current_ga, tier_map, 1, strategy_mode, game_type='Roulette')
         active_level = initial_tier.level
 
-        m_contrib = 0; m_tax = 0; m_play_pnl = 0
-        m_holidays = 0; m_insolvent_months = 0; m_total_volume = 0 
-        gold_hit_year = -1; current_year_points = 0; failed_year_one = False
-        last_session_won = False
+        m_insolvent_months = 0; failed_year_one = False
         y1_log = []
+        last_session_won = False
 
         for m in range(total_months):
-            if m > 0 and m % 12 == 0: current_year_points = 0
-
             # Tax
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
-                tax = surplus * (overrides.tax_rate / 100.0)
-                current_ga -= tax
-                m_tax += tax
+                current_ga -= surplus * (overrides.tax_rate / 100.0)
 
             # Contribution
             should_contribute = True
@@ -120,9 +95,6 @@ class RouletteWorker:
             if should_contribute:
                 amount = contrib_win if last_session_won else contrib_loss
                 current_ga += amount
-                m_contrib += amount
-            else:
-                m_holidays += 1
             
             # Insolvency
             can_play = (current_ga >= insolvency_floor)
@@ -131,130 +103,127 @@ class RouletteWorker:
                 if m < 12: failed_year_one = True
             
             if can_play:
-                # Session Scheduling
                 sessions_this_month = sessions_per_year // 12
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    is_penalty = False 
-                    
                     pnl, vol, used_level, spins = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
-                        is_penalty, active_level, strategy_mode
+                        False, active_level, strategy_mode
                     )
-                    
                     active_level = used_level 
                     current_ga += pnl
                     running_play_pnl += pnl
-                    m_play_pnl += pnl
-                    m_total_volume += vol
                     last_session_won = (pnl > 0)
-                    current_year_points += vol * (earn_rate / 100)
                     
                     if track_y1_details and m < 12:
-                        y1_log.append({
-                            'month': m + 1, 'result': pnl, 'balance': current_ga,
-                            'game_bal': start_ga + running_play_pnl, 'hands': spins
-                        })
+                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': spins})
             else:
                  if track_y1_details and m < 12:
-                        y1_log.append({
-                            'month': m + 1, 'result': 0, 'balance': current_ga,
-                            'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'
-                        })
+                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
 
-            if gold_hit_year == -1 and current_year_points >= target_points:
-                gold_hit_year = (m // 12) + 1
-            
             trajectory.append(current_ga)
             
-        return {
-            'trajectory': trajectory, 'final_ga': current_ga, 'contrib': m_contrib,
-            'tax': m_tax, 'play_pnl': m_play_pnl, 'holidays': m_holidays,
-            'insolvent_months': m_insolvent_months, 'total_volume': m_total_volume,
-            'gold_year': gold_hit_year, 'failed_y1': failed_year_one,
-            'y1_log': y1_log 
-        }
+        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': 0, 'contrib': 0, 'gold_year': -1, 'total_volume': 0}
 
 def show_roulette_sim():
-    running = False
     
     def load_saved_strategies():
-        profile = load_profile()
-        return profile.get('saved_strategies', {}) # Shared library with Baccarat for now
+        try:
+            profile = load_profile()
+            return profile.get('saved_strategies', {})
+        except: return {}
 
     def update_strategy_list():
-        saved = load_saved_strategies()
-        select_saved.options = list(saved.keys())
-        select_saved.update()
+        try:
+            saved = load_saved_strategies()
+            select_saved.options = list(saved.keys())
+            select_saved.update()
+        except: pass
 
     def save_current_strategy():
-        name = input_name.value
-        if not name: return
-        profile = load_profile()
-        if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
-        
-        config = {
-            'sim_num': slider_num_sims.value, 'sim_years': slider_years.value, 'sim_freq': slider_frequency.value,
-            'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
-            'eco_hol': switch_holiday.value, 'eco_hol_ceil': slider_holiday_ceil.value, 'eco_insolvency': slider_insolvency.value,
-            'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
-            'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
-            'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
-            'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
-            'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
-            'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
-            'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value
-        }
-        profile['saved_strategies'][name] = config
-        save_profile(profile)
-        ui.notify(f'Saved: {name}', type='positive')
-        update_strategy_list()
+        try:
+            name = input_name.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
+            
+            config = {
+                'sim_num': slider_num_sims.value, 'sim_years': slider_years.value, 'sim_freq': slider_frequency.value,
+                'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
+                'eco_hol': switch_holiday.value, 'eco_hol_ceil': slider_holiday_ceil.value, 'eco_insolvency': slider_insolvency.value,
+                'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
+                'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
+                'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
+                'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
+                'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
+                'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
+                'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value
+            }
+            profile['saved_strategies'][name] = config
+            save_profile(profile)
+            ui.notify(f'Saved: {name}', type='positive')
+            update_strategy_list()
+        except Exception as e: ui.notify(str(e), type='negative')
 
     def load_selected_strategy():
-        name = select_saved.value
-        if not name: return
-        saved = load_saved_strategies()
-        config = saved.get(name)
-        if not config: return
-        
-        slider_num_sims.value = config.get('sim_num', 20)
-        slider_years.value = config.get('sim_years', 10)
-        slider_frequency.value = config.get('sim_freq', 10)
-        slider_contrib_win.value = config.get('eco_win', 300)
-        slider_contrib_loss.value = config.get('eco_loss', 300)
-        switch_luxury_tax.value = config.get('eco_tax', False)
-        slider_tax_thresh.value = config.get('eco_tax_thresh', 12500)
-        slider_tax_rate.value = config.get('eco_tax_rate', 25)
-        switch_holiday.value = config.get('eco_hol', False)
-        slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
-        slider_insolvency.value = config.get('eco_insolvency', 1000) 
-        slider_safety.value = config.get('tac_safety', 25)
-        slider_iron_gate.value = config.get('tac_iron', 3)
-        select_press.value = config.get('tac_press', 1)
-        slider_press_depth.value = config.get('tac_depth', 3)
-        slider_shoes.value = config.get('tac_shoes', 3)
-        # Handle Baccarat legacy strings safely
-        bet_val = config.get('tac_bet', 'Red')
-        if bet_val not in BET_MAP: bet_val = 'Red'
-        select_bet_strat.value = bet_val
-        
-        switch_penalty.value = config.get('tac_penalty', True)
-        select_engine_mode.value = config.get('tac_mode', 'Standard') 
-        slider_stop_loss.value = config.get('risk_stop', 10)
-        slider_profit.value = config.get('risk_prof', 10)
-        switch_ratchet.value = config.get('risk_ratch', False)
-        select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
-        select_status.value = config.get('gold_stat', 'Gold')
-        slider_earn_rate.value = config.get('gold_earn', 10)
-        slider_start_ga.value = config.get('start_ga', 2000)
-        ui.notify(f'Loaded: {name}', type='info')
+        try:
+            name = select_saved.value
+            if not name: return
+            saved = load_saved_strategies()
+            config = saved.get(name)
+            if not config: return
+            
+            slider_num_sims.value = config.get('sim_num', 20)
+            slider_years.value = config.get('sim_years', 10)
+            slider_frequency.value = config.get('sim_freq', 10)
+            slider_contrib_win.value = config.get('eco_win', 300)
+            slider_contrib_loss.value = config.get('eco_loss', 300)
+            switch_luxury_tax.value = config.get('eco_tax', False)
+            slider_tax_thresh.value = config.get('eco_tax_thresh', 12500)
+            slider_tax_rate.value = config.get('eco_tax_rate', 25)
+            switch_holiday.value = config.get('eco_hol', False)
+            slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
+            slider_insolvency.value = config.get('eco_insolvency', 1000) 
+            slider_safety.value = config.get('tac_safety', 25)
+            slider_iron_gate.value = config.get('tac_iron', 3)
+            select_press.value = config.get('tac_press', 1)
+            slider_press_depth.value = config.get('tac_depth', 3)
+            slider_shoes.value = config.get('tac_shoes', 3)
+            # Handle Baccarat legacy strings safely
+            bet_val = config.get('tac_bet', 'Red')
+            if bet_val not in BET_MAP: bet_val = 'Red'
+            select_bet_strat.value = bet_val
+            
+            switch_penalty.value = config.get('tac_penalty', True)
+            select_engine_mode.value = config.get('tac_mode', 'Standard') 
+            slider_stop_loss.value = config.get('risk_stop', 10)
+            slider_profit.value = config.get('risk_prof', 10)
+            switch_ratchet.value = config.get('risk_ratch', False)
+            select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
+            select_status.value = config.get('gold_stat', 'Gold')
+            slider_earn_rate.value = config.get('gold_earn', 10)
+            slider_start_ga.value = config.get('start_ga', 2000)
+            ui.notify(f'Loaded: {name}', type='info')
+        except: pass
+
+    def delete_selected_strategy():
+        try:
+            name = select_saved.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' in profile and name in profile['saved_strategies']:
+                del profile['saved_strategies'][name]
+                save_profile(profile)
+                ui.notify(f'Deleted: {name}', type='negative')
+                select_saved.value = None
+                update_strategy_list()
+        except: pass
 
     def update_ladder_preview():
         try:
             factor = slider_safety.value
             mode = select_engine_mode.value
-            # Generate ROULETTE Tiers
             t_map = generate_tier_map(factor, mode=mode, game_type='Roulette')
             
             rows = []
@@ -266,7 +235,7 @@ def show_roulette_sim():
             ladder_grid.options['rowData'] = rows
             ladder_grid.update()
         except Exception as e:
-            print(f"Preview Error: {str(e)}")
+            pass # Silent fail to prevent UI crash
 
     # --- QUICK REFRESH ---
     async def refresh_single_universe():
@@ -383,25 +352,17 @@ def show_roulette_sim():
         mean_line = np.mean(trajectories, axis=0); median_line = np.median(trajectories, axis=0)
         
         avg_final_ga = np.mean([r['final_ga'] for r in results])
-        avg_tax = np.mean([r['tax'] for r in results])
         avg_insolvent = np.mean([r['insolvent_months'] for r in results])
         total_months = config['years'] * 12
         insolvency_pct = (avg_insolvent / total_months) * 100
         y1_failures = len([r for r in results if r['failed_y1']])
         y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
         active_pct = 100 - insolvency_pct
-        total_input = start_ga + np.mean([r['contrib'] for r in results])
-        total_output = avg_final_ga + avg_tax
-        net_life_result = total_output - total_input
-        net_cost = total_input - total_output
-        real_monthly_cost = net_cost / total_months
         survivor_count = len([r for r in results if r['final_ga'] >= 100])
         score_survival = (survivor_count / len(results)) * 100
-        if real_monthly_cost <= 0: score_cost = 100
-        else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
         
         # Simplified scoring for Roulette
-        total_score = (score_survival * 0.50) + (score_cost * 0.30) + (active_pct * 0.20)
+        total_score = (score_survival * 0.70) + (active_pct * 0.30)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
         elif total_score >= 80: grade, g_col = "B", "text-blue-400"
         elif total_score >= 70: grade, g_col = "C", "text-yellow-400"
@@ -418,17 +379,11 @@ def show_roulette_sim():
                             ui.label(f"{grade}").classes(f'text-6xl font-black {g_col} leading-none')
                             ui.label(f"{total_score:.1f}% Score").classes(f'text-sm font-bold {g_col}')
                         with ui.column().classes('items-center'):
-                            ui.label('REAL MONTHLY COST').classes('text-[10px] text-slate-500 font-bold tracking-widest')
-                            if real_monthly_cost > 0:
-                                ui.label(f"€{real_monthly_cost:,.0f}").classes('text-4xl font-black text-red-400 leading-none')
-                                ui.label("Net Cost").classes('text-xs font-bold text-red-900 bg-red-400 px-1 rounded')
-                            else:
-                                ui.label(f"+€{abs(real_monthly_cost):,.0f}").classes('text-4xl font-black text-green-400 leading-none')
-                                ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
+                            ui.label('SURVIVAL RATE').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            ui.label(f"{score_survival:.1f}%").classes('text-4xl font-black text-white leading-none')
                         with ui.column().classes('items-center'):
-                            ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
-                            ui.label(f"€{total_output:,.0f}").classes('text-4xl font-black text-white leading-none')
-                            if avg_tax > 0: ui.label(f"(GA €{avg_final_ga:,.0f} + Tax €{avg_tax:,.0f})").classes('text-xs font-bold text-yellow-400')
+                            ui.label('AVG END BALANCE').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            ui.label(f"€{avg_final_ga:,.0f}").classes('text-4xl font-black text-white leading-none')
                     
         with chart_container:
             chart_container.clear()
@@ -451,7 +406,7 @@ def show_roulette_sim():
                     table_rows = []
                     for entry in y1_log:
                         res_val = entry.get('result', 0)
-                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}"})
+                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
                     ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
         with report_container:
@@ -514,7 +469,6 @@ def show_roulette_sim():
 
                 with ui.column():
                     ui.label('ROULETTE GAMEPLAY').classes('font-bold text-red-400')
-                    # ROULETTE SPECIFIC BETS
                     select_bet_strat = ui.select(list(BET_MAP.keys()), value='Red', label='Bet Selection').classes('w-full')
                     slider_shoes = ui.slider(min=1, max=5, value=2).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v*60} Spins (approx {v} hours)')
                     
