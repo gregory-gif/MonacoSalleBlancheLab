@@ -79,14 +79,14 @@ class RouletteWorker:
         active_level = initial_tier.level
 
         m_insolvent_months = 0; failed_year_one = False
-        m_tax = 0 # Track tax
+        m_tax = 0 
         m_contrib = 0
         
         y1_log = []
         last_session_won = False
 
         for m in range(total_months):
-            # Tax Logic (Fixed to track amount)
+            # Tax Logic
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
                 tax_amt = surplus * (overrides.tax_rate / 100.0)
@@ -133,7 +133,6 @@ class RouletteWorker:
         return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': -1, 'total_volume': 0}
 
 def show_roulette_sim():
-    # SCOPE FIX: Define running here
     running = False 
     
     def load_saved_strategies():
@@ -198,7 +197,7 @@ def show_roulette_sim():
             select_press.value = config.get('tac_press', 1)
             slider_press_depth.value = config.get('tac_depth', 3)
             slider_shoes.value = config.get('tac_shoes', 3)
-            # Handle Baccarat legacy strings safely
+            
             bet_val = config.get('tac_bet', 'Red')
             if bet_val not in BET_MAP: bet_val = 'Red'
             select_bet_strat.value = bet_val
@@ -360,9 +359,7 @@ def show_roulette_sim():
         mean_line = np.mean(trajectories, axis=0); median_line = np.median(trajectories, axis=0)
         
         avg_final_ga = np.mean([r['final_ga'] for r in results])
-        # FIXED: Define avg_tax
         avg_tax = np.mean([r['tax'] for r in results])
-        
         avg_insolvent = np.mean([r['insolvent_months'] for r in results])
         total_months = config['years'] * 12
         insolvency_pct = (avg_insolvent / total_months) * 100
@@ -371,6 +368,7 @@ def show_roulette_sim():
         active_pct = 100 - insolvency_pct
         total_input = start_ga + np.mean([r['contrib'] for r in results])
         total_output = avg_final_ga + avg_tax
+        grand_total_wealth = total_output
         net_life_result = total_output - total_input
         net_cost = total_input - total_output
         real_monthly_cost = net_cost / total_months
@@ -379,6 +377,7 @@ def show_roulette_sim():
         if real_monthly_cost <= 0: score_cost = 100
         else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
         
+        # Simplified scoring for Roulette
         total_score = (score_survival * 0.70) + (active_pct * 0.30)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
         elif total_score >= 80: grade, g_col = "B", "text-blue-400"
@@ -438,6 +437,17 @@ def show_roulette_sim():
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
             lines.append(f"Betting: {overrides.bet_strategy} | Spins/Sess: {overrides.shoes_per_session * 60}")
             lines.append(f"Game: French Roulette (La Partage on Zero)")
+            
+            # --- RESTORED RESULTS BLOCK ---
+            lines.append("\n=== PERFORMANCE RESULTS ===")
+            lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
+            lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
+            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
+            lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
+            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+            lines.append(f"Active Play Time: {active_pct:.1f}%")
+            lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
+            
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
@@ -514,5 +524,14 @@ def show_roulette_sim():
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
-        scoreboard_container = ui.column().classes('w-full mb-4'); chart_container = ui.card().classes('w-full bg-slate-900 p-4'); chart_single_container = ui.column().classes('w-full mt-4'); flight_recorder_container = ui.column().classes('w-full mb-4'); report_container = ui.column().classes('w-full')
+        scoreboard_container = ui.column().classes('w-full mb-4')
+        chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        
+        # --- BUTTON IS PLACED HERE NOW ---
+        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
+        chart_single_container = ui.column().classes('w-full mt-2')
+        
+        flight_recorder_container = ui.column().classes('w-full mb-4')
+        report_container = ui.column().classes('w-full')
+        
         update_ladder_preview()
