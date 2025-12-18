@@ -127,6 +127,8 @@ class RouletteWorker:
         return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': 0, 'contrib': 0, 'gold_year': -1, 'total_volume': 0}
 
 def show_roulette_sim():
+    # STATE (Defined here for correct scope)
+    running = False 
     
     def load_saved_strategies():
         try:
@@ -358,8 +360,15 @@ def show_roulette_sim():
         y1_failures = len([r for r in results if r['failed_y1']])
         y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
         active_pct = 100 - insolvency_pct
+        total_input = start_ga + np.mean([r['contrib'] for r in results])
+        total_output = avg_final_ga + avg_tax
+        net_life_result = total_output - total_input
+        net_cost = total_input - total_output
+        real_monthly_cost = net_cost / total_months
         survivor_count = len([r for r in results if r['final_ga'] >= 100])
         score_survival = (survivor_count / len(results)) * 100
+        if real_monthly_cost <= 0: score_cost = 100
+        else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
         
         # Simplified scoring for Roulette
         total_score = (score_survival * 0.70) + (active_pct * 0.30)
@@ -379,11 +388,17 @@ def show_roulette_sim():
                             ui.label(f"{grade}").classes(f'text-6xl font-black {g_col} leading-none')
                             ui.label(f"{total_score:.1f}% Score").classes(f'text-sm font-bold {g_col}')
                         with ui.column().classes('items-center'):
-                            ui.label('SURVIVAL RATE').classes('text-[10px] text-slate-500 font-bold tracking-widest')
-                            ui.label(f"{score_survival:.1f}%").classes('text-4xl font-black text-white leading-none')
+                            ui.label('REAL MONTHLY COST').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            if real_monthly_cost > 0:
+                                ui.label(f"€{real_monthly_cost:,.0f}").classes('text-4xl font-black text-red-400 leading-none')
+                                ui.label("Net Cost").classes('text-xs font-bold text-red-900 bg-red-400 px-1 rounded')
+                            else:
+                                ui.label(f"+€{abs(real_monthly_cost):,.0f}").classes('text-4xl font-black text-green-400 leading-none')
+                                ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
                         with ui.column().classes('items-center'):
-                            ui.label('AVG END BALANCE').classes('text-[10px] text-slate-500 font-bold tracking-widest')
-                            ui.label(f"€{avg_final_ga:,.0f}").classes('text-4xl font-black text-white leading-none')
+                            ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            ui.label(f"€{total_output:,.0f}").classes('text-4xl font-black text-white leading-none')
+                            if avg_tax > 0: ui.label(f"(GA €{avg_final_ga:,.0f} + Tax €{avg_tax:,.0f})").classes('text-xs font-bold text-yellow-400')
                     
         with chart_container:
             chart_container.clear()
