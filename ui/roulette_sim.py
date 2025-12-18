@@ -367,7 +367,9 @@ def show_roulette_sim():
         y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
         active_pct = 100 - insolvency_pct
         total_input = start_ga + np.mean([r['contrib'] for r in results])
+        
         total_output = avg_final_ga + avg_tax
+        grand_total_wealth = total_output # <--- FIXED HERE
         net_life_result = total_output - total_input
         net_cost = total_input - total_output
         real_monthly_cost = net_cost / total_months
@@ -517,7 +519,6 @@ def show_roulette_sim():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    # NEW OPTIONS
                     select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
@@ -532,15 +533,4 @@ def show_roulette_sim():
                      with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=20, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
-        label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
-        scoreboard_container = ui.column().classes('w-full mb-4')
-        chart_container = ui.card().classes('w-full bg-slate-900 p-4')
-        
-        # --- BUTTON IS PLACED HERE NOW ---
-        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
-        chart_single_container = ui.column().classes('w-full mt-2')
-        
-        flight_recorder_container = ui.column().classes('w-full mb-4')
-        report_container = ui.column().classes('w-full')
-        
-        update_ladder_preview()
+        label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress
