@@ -81,11 +81,17 @@ class RouletteWorker:
         m_insolvent_months = 0; failed_year_one = False
         m_tax = 0 
         m_contrib = 0
+        m_total_volume = 0
+        gold_hit_year = -1
+        current_year_points = 0
         
         y1_log = []
         last_session_won = False
 
         for m in range(total_months):
+            if m > 0 and m % 12 == 0:
+                current_year_points = 0
+
             # Tax Logic
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
@@ -120,6 +126,8 @@ class RouletteWorker:
                     active_level = used_level 
                     current_ga += pnl
                     running_play_pnl += pnl
+                    m_total_volume += vol
+                    current_year_points += vol * (earn_rate / 100)
                     last_session_won = (pnl > 0)
                     
                     if track_y1_details and m < 12:
@@ -128,9 +136,12 @@ class RouletteWorker:
                  if track_y1_details and m < 12:
                         y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
 
+            if gold_hit_year == -1 and current_year_points >= target_points:
+                gold_hit_year = (m // 12) + 1
+
             trajectory.append(current_ga)
             
-        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': -1, 'total_volume': 0}
+        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': gold_hit_year, 'total_volume': m_total_volume}
 
 def show_roulette_sim():
     running = False 
@@ -361,6 +372,10 @@ def show_roulette_sim():
         avg_final_ga = np.mean([r['final_ga'] for r in results])
         avg_tax = np.mean([r['tax'] for r in results])
         avg_insolvent = np.mean([r['insolvent_months'] for r in results])
+        
+        gold_hits = [r['gold_year'] for r in results if r['gold_year'] != -1]
+        gold_prob = (len(gold_hits) / len(results)) * 100
+        
         total_months = config['years'] * 12
         insolvency_pct = (avg_insolvent / total_months) * 100
         y1_failures = len([r for r in results if r['failed_y1']])
@@ -369,7 +384,7 @@ def show_roulette_sim():
         total_input = start_ga + np.mean([r['contrib'] for r in results])
         
         total_output = avg_final_ga + avg_tax
-        grand_total_wealth = total_output # <--- FIXED HERE
+        grand_total_wealth = total_output
         net_life_result = total_output - total_input
         net_cost = total_input - total_output
         real_monthly_cost = net_cost / total_months
@@ -434,12 +449,11 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
-            lines = ["=== ROULETTE CONFIGURATION ==="]
+            lines = ["=== CONFIGURATION ==="]
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
             lines.append(f"Betting: {overrides.bet_strategy} | Spins/Sess: {overrides.shoes_per_session * 60}")
-            lines.append(f"Game: French Roulette (La Partage on Zero)")
+            lines.append(f"Gold Probability: {gold_prob:.1f}%")
             
-            # --- RESTORED RESULTS BLOCK ---
             lines.append("\n=== PERFORMANCE RESULTS ===")
             lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
             lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
@@ -449,7 +463,6 @@ def show_roulette_sim():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
             
-            # --- RESTORED CSV BLOCK ---
             y1_log = results[0].get('y1_log', [])
             if y1_log:
                 lines.append("\n=== YEAR 1 DATA (COPY/PASTE) ===")
@@ -533,4 +546,14 @@ def show_roulette_sim():
                      with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=20, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
-        label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress
+        label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
+        scoreboard_container = ui.column().classes('w-full mb-4')
+        chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        
+        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
+        chart_single_container = ui.column().classes('w-full mt-2')
+        
+        flight_recorder_container = ui.column().classes('w-full mb-4')
+        report_container = ui.column().classes('w-full')
+        
+        update_ladder_preview()
