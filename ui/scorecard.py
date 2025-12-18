@@ -1,128 +1,188 @@
 from nicegui import ui
+from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, BetStrategy, StrategyOverrides
+from engine.tier_params import get_tier_for_ga, generate_tier_map
+from utils.persistence import load_profile, save_profile, log_session_result
 
-# --- STATE MANAGEMENT ---
-class ScorecardState:
+# --- LIVE SESSION MANAGER ---
+class LiveSessionManager:
     def __init__(self):
-        self.history = []  # List of 'B', 'P', 'T'
+        self.state = None
+        self.history = [] 
         self.banker_wins = 0
         self.player_wins = 0
         self.ties = 0
+        self.start_ga = 0.0
+        self.current_ga = 0.0
+        self.active_strategy_name = "Manual"
 
-# Global state instance
-state = ScorecardState()
+    def start_session(self, strategy_name: str, config: dict, current_profile_ga: float):
+        self.active_strategy_name = strategy_name
+        self.start_ga = current_profile_ga
+        self.current_ga = current_profile_ga
+        self.history = []
+        self.banker_wins = 0; self.player_wins = 0; self.ties = 0
+
+        # Build Objects
+        mode = config.get('tac_mode', 'Standard')
+        safety = config.get('tac_safety', 25)
+        tier_map = generate_tier_map(safety, mode=mode)
+        initial_tier = get_tier_for_ga(self.current_ga, tier_map, 1, mode)
+
+        overrides = StrategyOverrides(
+            iron_gate_limit=config.get('tac_iron', 3),
+            stop_loss_units=config.get('risk_stop', 10),
+            profit_lock_units=config.get('risk_prof', 10),
+            press_trigger_wins=config.get('tac_press', 1),
+            press_depth=config.get('tac_depth', 3),
+            ratchet_enabled=config.get('risk_ratch', False),
+            ratchet_mode=config.get('risk_ratch_mode', 'Standard'),
+            shoes_per_session=config.get('tac_shoes', 3),
+            bet_strategy=BetStrategy.BANKER if config.get('tac_bet', 'Banker') == 'Banker' else BetStrategy.PLAYER,
+            penalty_box_enabled=config.get('tac_penalty', True)
+        )
+        self.state = SessionState(tier=initial_tier, overrides=overrides)
+        
+    def process_result(self, result: str):
+        if not self.state: return
+        
+        # 1. What did the Engine WANT us to do?
+        decision = BaccaratStrategist.get_next_decision(self.state)
+        bet_amt = decision['bet_amount']
+        target = self.state.overrides.bet_strategy 
+        
+        # 2. Did we win?
+        won = False
+        pnl_change = 0.0
+        
+        if result != 'T':
+            if (target == BetStrategy.BANKER and result == 'B') or \
+               (target == BetStrategy.PLAYER and result == 'P'):
+                won = True
+                pnl_change = bet_amt # Engine applies commission inside update_state
+            else:
+                won = False
+                pnl_change = -bet_amt
+
+            # 3. Update Engine
+            BaccaratStrategist.update_state_after_hand(self.state, won, pnl_change)
+            
+            # 4. Update Wallet (Only if Real)
+            if not self.state.is_in_virtual_mode:
+                self.current_ga += self.state.session_pnl - (self.current_ga - self.start_ga) 
+                # Re-sync GA with State PnL to be safe (Engine handles commission math)
+                self.current_ga = self.start_ga + self.state.session_pnl
+
+        # 5. Stats
+        self.history.append(result)
+        if result == 'B': self.banker_wins += 1
+        elif result == 'P': self.player_wins += 1
+        else: self.ties += 1
+
+    def get_advice(self):
+        if not self.state: return {'mode': PlayMode.STOPPED, 'text': 'SELECT STRATEGY', 'color': 'bg-slate-700', 'sub': ''}
+        
+        decision = BaccaratStrategist.get_next_decision(self.state)
+        
+        if decision['mode'] == PlayMode.STOPPED:
+            return {'mode': PlayMode.STOPPED, 'text': decision['reason'], 'color': 'bg-red-600', 'sub': 'SESSION OVER'}
+            
+        if decision['reason'] == 'VIRTUAL (OBSERVING)':
+            return {'mode': PlayMode.PLAYING, 'text': 'VIRTUAL MODE', 'color': 'bg-yellow-600', 'sub': 'DO NOT BET (Wait for Virtual Win)'}
+            
+        target_str = self.state.overrides.bet_strategy.name
+        amt = decision['bet_amount']
+        return {'mode': PlayMode.PLAYING, 'text': f"BET €{amt:.0f} {target_str}", 'color': 'bg-green-600', 'sub': 'LIVE ACTION'}
+
+    def save_and_quit(self):
+        if not self.state: return
+        # Update Profile
+        profile = load_profile()
+        profile['ga'] = self.current_ga
+        save_profile(profile)
+        # Log Session
+        log_session_result(self.start_ga, self.current_ga, shoes_played=1)
+
+session = LiveSessionManager()
 
 def show_scorecard():
-    # --- UI LAYOUT ---
-    with ui.column().classes('w-full max-w-4xl mx-auto p-4 gap-4'):
+    
+    def refresh_advice():
+        advice = session.get_advice()
+        card_advice.classes(remove='bg-slate-700 bg-red-600 bg-yellow-600 bg-green-600')
+        card_advice.classes(add=advice['color'])
+        lbl_advice_main.set_text(advice['text'])
+        lbl_advice_sub.set_text(advice['sub'])
         
-        # 1. HEADER & CONTROLS
-        with ui.card().classes('w-full bg-slate-900 p-4 border-b-4 border-slate-700'):
-            with ui.row().classes('w-full justify-between items-center'):
-                ui.label('LIVE COCKPIT').classes('text-2xl font-light text-slate-200 tracking-widest')
-                btn_new_shoe = ui.button('NEW SHOE').props('outline color=yellow icon=refresh')
-
-            ui.separator().classes('bg-slate-700 my-4')
-
-            # INPUT BUTTONS
-            with ui.row().classes('w-full justify-center gap-6'):
-                # Player Button
-                btn_player = ui.button().classes('w-32 h-24 bg-blue-700 hover:bg-blue-600 rounded-xl shadow-[0_4px_0_rgb(29,78,216)] active:shadow-none active:translate-y-1 transition-all')
-                with btn_player:
-                    with ui.column().classes('items-center gap-0'):
-                        ui.label('PLAYER').classes('text-lg font-bold text-white')
-                        ui.label('P').classes('text-4xl font-black text-blue-200 opacity-50')
-                
-                # Tie Button
-                btn_tie = ui.button().classes('w-24 h-24 bg-green-700 hover:bg-green-600 rounded-xl shadow-[0_4px_0_rgb(21,128,61)] active:shadow-none active:translate-y-1 transition-all')
-                with btn_tie:
-                    with ui.column().classes('items-center gap-0'):
-                        ui.label('TIE').classes('text-lg font-bold text-white')
-                        ui.label('T').classes('text-4xl font-black text-green-200 opacity-50')
-
-                # Banker Button
-                btn_banker = ui.button().classes('w-32 h-24 bg-red-700 hover:bg-red-600 rounded-xl shadow-[0_4px_0_rgb(185,28,28)] active:shadow-none active:translate-y-1 transition-all')
-                with btn_banker:
-                    with ui.column().classes('items-center gap-0'):
-                        ui.label('BANKER').classes('text-lg font-bold text-white')
-                        ui.label('B').classes('text-4xl font-black text-red-200 opacity-50')
-
-            # UNDO
-            with ui.row().classes('w-full justify-center mt-4'):
-                btn_undo = ui.button('UNDO LAST HAND').props('flat color=grey size=sm icon=undo')
-
-        # 2. STATISTICS BAR
-        with ui.grid(columns=3).classes('w-full gap-2'):
-            with ui.card().classes('bg-blue-900/50 p-2 items-center border border-blue-700'):
-                lbl_player = ui.label('PLAYER: 0 (0.0%)').classes('text-blue-300 font-bold')
-            with ui.card().classes('bg-green-900/50 p-2 items-center border border-green-700'):
-                lbl_tie = ui.label('TIE: 0 (0.0%)').classes('text-green-300 font-bold')
-            with ui.card().classes('bg-red-900/50 p-2 items-center border border-red-700'):
-                lbl_banker = ui.label('BANKER: 0 (0.0%)').classes('text-red-300 font-bold')
-
-        # 3. BEAD PLATE (THE ROAD)
-        with ui.card().classes('w-full bg-white p-4 min-h-[120px]'):
-            ui.label('BEAD PLATE (Roadmap)').classes('text-slate-900 text-xs font-bold mb-2 tracking-widest uppercase')
-            # Initialize container
-            bead_plate = ui.row().classes('w-full flex-wrap gap-2')
-
-        # 4. RECENT HISTORY TEXT
-        with ui.card().classes('w-full bg-slate-800 p-2'):
-            big_road_lbl = ui.label('History: ').classes('text-slate-400 font-mono text-xs')
-
-    # --- LOGIC HANDLERS (Defined AFTER UI elements exist) ---
-    def update_ui():
-        # Update Labels
-        total = len(state.history)
+        total = len(session.history)
         if total > 0:
-            p_b = (state.banker_wins / total) * 100
-            p_p = (state.player_wins / total) * 100
-            p_t = (state.ties / total) * 100
-        else:
-            p_b = p_p = p_t = 0
-            
-        lbl_banker.set_text(f"BANKER: {state.banker_wins} ({p_b:.1f}%)")
-        lbl_player.set_text(f"PLAYER: {state.player_wins} ({p_p:.1f}%)")
-        lbl_tie.set_text(f"TIE: {state.ties} ({p_t:.1f}%)")
-        big_road_lbl.set_text("History: " + " > ".join(state.history[-15:]))
+            pb = (session.banker_wins/total)*100
+            pp = (session.player_wins/total)*100
+            pt = (session.ties/total)*100
+        else: pb=pp=pt=0
         
-        # Re-draw Bead Plate
+        lbl_stats.set_text(f"B: {session.banker_wins} ({pb:.0f}%) | P: {session.player_wins} ({pp:.0f}%) | T: {session.ties}")
+        
+        pnl = session.current_ga - session.start_ga
+        color = "text-green-400" if pnl >= 0 else "text-red-400"
+        lbl_pnl.set_text(f"PnL: €{pnl:,.0f}")
+        lbl_pnl.classes(remove="text-green-400 text-red-400"); lbl_pnl.classes(add=color)
+        lbl_ga.set_text(f"Bal: €{session.current_ga:,.0f}")
+        
         bead_plate.clear()
         with bead_plate:
-            if not state.history:
-                ui.label('Waiting for first hand...').classes('text-slate-400 italic text-sm')
-            else:
-                for res in state.history:
-                    color = 'bg-red-600' if res == 'B' else 'bg-blue-600' if res == 'P' else 'bg-green-600'
-                    ui.label(res).classes(f'w-8 h-8 rounded-full {color} text-white flex items-center justify-center font-bold shadow-md')
+            for res in session.history[-20:]: 
+                c = 'bg-red-500' if res == 'B' else 'bg-blue-500' if res == 'P' else 'bg-green-500'
+                ui.label(res).classes(f'w-8 h-8 rounded-full {c} text-white flex items-center justify-center font-bold text-xs')
 
-    def add_result(res):
-        state.history.append(res)
-        if res == 'B': state.banker_wins += 1
-        elif res == 'P': state.player_wins += 1
-        else: state.ties += 1
-        update_ui()
+    def handle_input(res):
+        if not session.state: ui.notify('Start a session first!', type='warning'); return
+        session.process_result(res)
+        refresh_advice()
 
-    def undo_last():
-        if not state.history: return
-        res = state.history.pop()
-        if res == 'B': state.banker_wins -= 1
-        elif res == 'P': state.player_wins -= 1
-        else: state.ties -= 1
-        update_ui()
+    def start_selected_strategy():
+        strat_name = select_strat.value
+        if not strat_name: return
+        profile = load_profile()
+        config = profile.get('saved_strategies', {}).get(strat_name)
+        if not config: ui.notify('Strategy config error', type='negative'); return
+        session.start_session(strat_name, config, profile.get('ga', 2000))
+        refresh_advice()
+        dialog_strat.close()
+        ui.notify(f'Session Started: {strat_name}', type='positive')
 
-    def reset_shoe():
-        state.history = []
-        state.banker_wins = 0
-        state.player_wins = 0
-        state.ties = 0
-        update_ui()
+    def finish_session():
+        session.save_and_quit()
+        ui.notify('Session Saved', type='info')
+        ui.open('/') 
 
-    # --- BINDING HANDLERS TO BUTTONS ---
-    btn_player.on_click(lambda: add_result('P'))
-    btn_banker.on_click(lambda: add_result('B'))
-    btn_tie.on_click(lambda: add_result('T'))
-    btn_undo.on_click(undo_last)
-    btn_new_shoe.on_click(reset_shoe)
+    # --- UI ---
+    with ui.column().classes('w-full max-w-xl mx-auto p-4 gap-4'):
+        with ui.card().classes('w-full p-6 items-center justify-center bg-slate-700 transition-colors duration-300') as card_advice:
+            lbl_advice_main = ui.label('SELECT STRATEGY').classes('text-3xl font-black text-white text-center')
+            lbl_advice_sub = ui.label('').classes('text-sm font-bold text-white/80 uppercase tracking-widest')
 
-    # Initial Render
-    update_ui()
+        with ui.row().classes('w-full justify-between px-2'):
+            lbl_ga = ui.label('Bal: €---').classes('text-slate-400 font-mono')
+            lbl_pnl = ui.label('PnL: €0').classes('text-slate-400 font-mono')
+            
+        with ui.grid(columns=3).classes('w-full gap-4'):
+            with ui.button(on_click=lambda: handle_input('P')).classes('h-24 bg-blue-700 rounded-xl shadow-[0_4px_0_rgb(29,78,216)] active:shadow-none active:translate-y-1'):
+                ui.label('PLAYER').classes('text-xl font-bold text-white')
+            with ui.button(on_click=lambda: handle_input('T')).classes('h-24 bg-green-700 rounded-xl shadow-[0_4px_0_rgb(21,128,61)] active:shadow-none active:translate-y-1'):
+                ui.label('TIE').classes('text-xl font-bold text-white')
+            with ui.button(on_click=lambda: handle_input('B')).classes('h-24 bg-red-700 rounded-xl shadow-[0_4px_0_rgb(185,28,28)] active:shadow-none active:translate-y-1'):
+                ui.label('BANKER').classes('text-xl font-bold text-white')
+
+        with ui.card().classes('w-full bg-slate-800 p-3 min-h-[60px]'): bead_plate = ui.row().classes('flex-wrap gap-1')
+        lbl_stats = ui.label('B: 0 | P: 0 | T: 0').classes('text-xs text-slate-500 w-full text-center')
+
+        with ui.row().classes('w-full justify-center gap-4 mt-4'):
+            ui.button('START SESSION', on_click=lambda: dialog_strat.open()).props('icon=play_arrow color=yellow text-color=black')
+            ui.button('CASH OUT', on_click=finish_session).props('icon=save color=slate')
+
+    with ui.dialog() as dialog_strat, ui.card().classes('bg-slate-800 text-white min-w-[300px]'):
+        ui.label('Choose Protocol').classes('text-lg font-bold mb-4')
+        prof = load_profile()
+        strats = list(prof.get('saved_strategies', {}).keys())
+        select_strat = ui.select(strats, label='Strategy').classes('w-full mb-6')
+        ui.button('INITIALIZE', on_click=start_selected_strategy).props('color=green w-full')
