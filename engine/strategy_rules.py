@@ -22,7 +22,8 @@ class StrategyOverrides:
     ratchet_lock_pct: float = 0.5
     tax_threshold: float = 12500.0
     tax_rate: float = 25.0
-    bet_strategy: BetStrategy = BetStrategy.BANKER
+    bet_strategy: any = BetStrategy.BANKER # Typed 'any' to allow Roulette Strings
+    bet_strategy_2: str = None # NEW: Secondary Bet
     shoes_per_session: int = 3
     penalty_box_enabled: bool = True
 
@@ -40,7 +41,7 @@ class SessionState:
     mode: PlayMode = PlayMode.PLAYING
     shoe3_start_pnl: float = 0.0
     
-    # --- NEW: VIRTUAL MODE TRACKING ---
+    # --- VIRTUAL MODE TRACKING ---
     is_in_virtual_mode: bool = False
     virtual_loss_counter: int = 0
 
@@ -51,12 +52,8 @@ class BaccaratStrategist:
         
         # 0. VIRTUAL MODE CHECK
         if state.is_in_virtual_mode:
-            return {
-                'mode': PlayMode.PLAYING, 
-                'bet_amount': 0, 
-                'reason': 'VIRTUAL (OBSERVING)',
-                'bet_target': state.overrides.bet_strategy.name
-            }
+            target = state.overrides.bet_strategy.name if hasattr(state.overrides.bet_strategy, 'name') else str(state.overrides.bet_strategy)
+            return {'mode': PlayMode.PLAYING, 'bet_amount': 0, 'reason': 'VIRTUAL (OBSERVING)', 'bet_target': target}
 
         # 1. STOP LOSS
         stop_limit = state.tier.stop_loss
@@ -92,7 +89,8 @@ class BaccaratStrategist:
             state.is_in_virtual_mode = True
             state.current_press_streak = 0
             state.consecutive_losses = 0 
-            return {'mode': PlayMode.PLAYING, 'bet_amount': 0, 'reason': 'IRON GATE TRIGGERED', 'bet_target': state.overrides.bet_strategy.name}
+            target = state.overrides.bet_strategy.name if hasattr(state.overrides.bet_strategy, 'name') else str(state.overrides.bet_strategy)
+            return {'mode': PlayMode.PLAYING, 'bet_amount': 0, 'reason': 'IRON GATE TRIGGERED', 'bet_target': target}
 
         # 5. BET SIZING
         bet = base_val
@@ -105,7 +103,8 @@ class BaccaratStrategist:
                 steps = min(state.current_press_streak, state.overrides.press_depth)
                 bet = base_val + (steps * state.tier.press_unit)
 
-        return {'mode': PlayMode.PLAYING, 'bet_amount': bet, 'reason': 'ACTION', 'bet_target': state.overrides.bet_strategy.name}
+        target = state.overrides.bet_strategy.name if hasattr(state.overrides.bet_strategy, 'name') else str(state.overrides.bet_strategy)
+        return {'mode': PlayMode.PLAYING, 'bet_amount': bet, 'reason': 'ACTION', 'bet_target': target}
 
     @staticmethod
     def update_state_after_hand(state: SessionState, won: bool, pnl_change: float):
