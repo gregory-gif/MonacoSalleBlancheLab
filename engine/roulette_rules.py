@@ -29,6 +29,10 @@ class RouletteSessionState:
     consecutive_losses: int = 0
     current_press_streak: int = 0
     locked_profit: float = -999999.0
+    
+    # NEW: Specific tracker for D'Alembert level (0 to 4)
+    dalembert_level: int = 0 
+    
     mode: str = 'PLAYING' # 'PLAYING', 'STOPPED'
 
 class RouletteStrategist:
@@ -36,7 +40,7 @@ class RouletteStrategist:
     def get_next_decision(state):
         base_val = state.tier.base_unit
         
-        # Stop Loss
+        # 1. STOP LOSS / PROFIT (Standard Checks)
         stop_limit = state.tier.stop_loss
         if state.overrides.stop_loss_units > 0:
             stop_limit = -(state.overrides.stop_loss_units * base_val)
@@ -44,13 +48,11 @@ class RouletteStrategist:
         if state.session_pnl <= stop_limit:
             return {'mode': 'STOPPED', 'bet': 0, 'reason': 'STOP LOSS'}
 
-        # Take Profit
         if state.overrides.profit_lock_units > 0:
             target = state.overrides.profit_lock_units * base_val
             if state.session_pnl >= target:
                 return {'mode': 'STOPPED', 'bet': 0, 'reason': 'TARGET HIT'}
 
-        # Ratchet
         if state.overrides.ratchet_enabled:
             if state.session_pnl <= state.locked_profit and state.locked_profit > -9999:
                 return {'mode': 'STOPPED', 'bet': 0, 'reason': 'RATCHET'}
@@ -60,18 +62,30 @@ class RouletteStrategist:
             elif curr_u >= 12 and state.locked_profit < (5 * base_val): state.locked_profit = 5 * base_val
             elif curr_u >= 20 and state.locked_profit < (10 * base_val): state.locked_profit = 10 * base_val
 
-        # Iron Gate
-        if state.consecutive_losses >= state.overrides.iron_gate_limit:
-            state.current_press_streak = 0
-
-        # Bet Sizing
+        # 2. BET SIZING LOGIC
         bet = base_val
         press_mode = state.overrides.press_trigger_wins
         
-        if press_mode == 3: # Progression 1-1.5-2.5
+        # --- NEW OPTION 4: CAPPED D'ALEMBERT ---
+        if press_mode == 4:
+            # state.dalembert_level represents steps above base.
+            # 0 = €5, 1 = €10, 2 = €15, 3 = €20, 4 = €25 (Cap)
+            
+            # Calculate current bet based on level
+            bet = base_val + (state.dalembert_level * 5.0)
+            
+            # Safety Clamp (Just in case logic drifts)
+            if bet < 5.0: bet = 5.0
+            if bet > 25.0: bet = 25.0
+            
+        # --- EXISTING POSITIVE PROGRESSIONS ---
+        elif press_mode == 3: # Progression 1-1.5-2.5 (Titan Baccarat Style)
             if state.current_press_streak == 1: bet = base_val * 1.5
             elif state.current_press_streak >= 2: bet = base_val * 2.5
-        elif press_mode > 0:
+            if state.consecutive_losses >= state.overrides.iron_gate_limit: state.current_press_streak = 0
+            
+        elif press_mode > 0: # Standard Press 1 or 2
+            if state.consecutive_losses >= state.overrides.iron_gate_limit: state.current_press_streak = 0
             if state.current_press_streak >= press_mode:
                 press_steps = min(state.current_press_streak, state.overrides.press_depth)
                 bet = base_val + (press_steps * state.tier.press_unit)
@@ -85,7 +99,7 @@ class RouletteStrategist:
         pnl_change = 0
         
         if number == 0:
-            # MONACO LA PARTAGE: Lose half
+            # La Partage
             pnl_change = -(bet_amount / 2.0)
             won = False 
         else:
@@ -97,8 +111,26 @@ class RouletteStrategist:
                 won = False
                 pnl_change = -bet_amount
 
+        # Update PnL
         state.session_pnl += pnl_change
         
+        # --- UPDATE STATE FOR NEXT HAND ---
+        
+        # D'ALEMBERT LOGIC UPDATER
+        if state.overrides.press_trigger_wins == 4:
+            if won:
+                # Win: Remove 1 Unit (decrease level)
+                if state.dalembert_level > 0:
+                    state.dalembert_level -= 1
+            else:
+                # Lose: Add 1 Unit (increase level)
+                # CRITICAL RULE: If at Cap (€25 = Level 4) and Lose, RESET to Floor.
+                if state.dalembert_level >= 4:
+                    state.dalembert_level = 0 # The Reset
+                else:
+                    state.dalembert_level += 1
+        
+        # STANDARD STREAK TRACKING (For other modes)
         if won:
             state.consecutive_losses = 0
             state.current_press_streak += 1
