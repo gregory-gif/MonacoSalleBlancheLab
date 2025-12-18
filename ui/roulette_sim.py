@@ -447,6 +447,14 @@ def show_roulette_sim():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
             
+            # --- RESTORED CSV BLOCK ---
+            y1_log = results[0].get('y1_log', [])
+            if y1_log:
+                lines.append("\n=== YEAR 1 DATA (COPY/PASTE) ===")
+                lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
+                for e in y1_log:
+                    lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
@@ -508,6 +516,7 @@ def show_roulette_sim():
                     slider_profit = ui.slider(min=3, max=50, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
+                    
                     # NEW OPTIONS
                     select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
