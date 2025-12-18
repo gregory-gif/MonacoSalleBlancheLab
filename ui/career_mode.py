@@ -5,6 +5,7 @@ import asyncio
 import traceback
 from copy import deepcopy
 
+# --- CRITICAL INTEGRATION ---
 from ui.simulator import SimulationWorker
 from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
 from engine.tier_params import get_tier_for_ga, generate_tier_map
@@ -16,6 +17,7 @@ class CareerManager:
         current_ga = start_ga
         current_leg_idx = 0
         
+        # Load Initial Strategy
         active_config = sequence_config[0]['config']
         active_strategy_name = sequence_config[0]['strategy_name']
         active_target = sequence_config[0]['target_ga']
@@ -29,6 +31,7 @@ class CareerManager:
         last_session_won = False
         
         for m in range(months):
+            # 1. CHECK FOR PROMOTION
             if current_leg_idx < len(sequence_config) - 1:
                 if current_ga >= active_target:
                     current_leg_idx += 1
@@ -48,6 +51,7 @@ class CareerManager:
                     temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode)
                     active_level = temp_tier.level
 
+            # 2. ECOSYSTEM (Tax/Contrib)
             tax_rate = active_config.get('eco_tax_rate', 25)
             tax_thresh = active_config.get('eco_tax_thresh', 12500)
             use_tax = active_config.get('eco_tax', False)
@@ -69,6 +73,7 @@ class CareerManager:
                 amount = contrib_win if last_session_won else contrib_loss
                 current_ga += amount
             
+            # 3. INSOLVENCY CHECK
             insolvency_floor = active_config.get('eco_insolvency', 1000)
             if current_ga < insolvency_floor:
                 if len(log) == 0 or log[-1]['event'] != 'INSOLVENT':
@@ -76,6 +81,7 @@ class CareerManager:
                 trajectory.append(current_ga)
                 continue 
 
+            # 4. PLAY SESSIONS
             sessions_this_month = sessions_per_year // 12
             if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
             
@@ -160,6 +166,7 @@ def show_career_mode():
         progress.set_visibility(True)
         results_area.clear()
         
+        # Load Configs
         profile = load_profile()
         saved_strats = profile.get('saved_strategies', {})
         sequence_config = []
@@ -173,8 +180,9 @@ def show_career_mode():
         start_ga = slider_start_ga.value
         years = slider_years.value
         sessions = slider_freq.value
-        num_sims = slider_num_sims.value 
+        num_sims = slider_num_sims.value # New Slider
         
+        # --- BATCH EXECUTION ---
         def run_batch():
             batch_results = []
             for _ in range(num_sims):
@@ -184,21 +192,27 @@ def show_career_mode():
 
         results = await asyncio.to_thread(run_batch)
         
+        # --- DATA PROCESSING ---
         trajectories = np.array([r['trajectory'] for r in results])
         months = list(range(trajectories.shape[1]))
         
+        # Bands
         min_band = np.min(trajectories, axis=0)
         max_band = np.max(trajectories, axis=0)
         p25_band = np.percentile(trajectories, 25, axis=0)
         p75_band = np.percentile(trajectories, 75, axis=0)
+        mean_line = np.mean(trajectories, axis=0)
         median_line = np.median(trajectories, axis=0)
         
+        # Stats
         survivors = len([r for r in results if r['final'] > 100])
         survival_rate = (survivors / num_sims) * 100
         avg_final = np.mean([r['final'] for r in results])
         
         progress.set_visibility(False)
         with results_area:
+            
+            # 1. SCOREBOARD
             with ui.row().classes('w-full justify-between mb-4'):
                 with ui.card().classes('bg-slate-800 p-2'):
                     ui.label('SURVIVAL RATE').classes('text-xs text-slate-400')
@@ -211,10 +225,14 @@ def show_career_mode():
                     ui.label('AVG END WEALTH').classes('text-xs text-slate-400')
                     ui.label(f"€{avg_final:,.0f}").classes('text-2xl font-black text-white')
 
+            # 2. MULTIVERSE CHART (Confidence Bands)
             ui.label('THE MULTIVERSE (Probabilities)').classes('text-sm font-bold text-slate-400 mt-2')
             fig_multi = go.Figure()
+            # Gray Band (Best/Worst)
             fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Range'))
+            # Green Band (Likely)
             fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(74, 222, 128, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
+            # Median Line
             fig_multi.add_trace(go.Scatter(x=months, y=median_line, mode='lines', name='Median', line=dict(color='yellow', width=2)))
             
             for leg in legs[:-1]:
@@ -223,19 +241,27 @@ def show_career_mode():
             fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
             ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
 
+            # 3. SINGLE REALITY CHART (Sim #1)
             ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
+            
+            # Grab Sim #1 Data
             sim1_traj = results[0]['trajectory']
             sim1_log = results[0]['log']
             sim1_final = results[0]['final']
+            
             res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
             ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+            
             fig_single = go.Figure()
             fig_single.add_trace(go.Scatter(y=sim1_traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+            
             for leg in legs[:-1]:
                 fig_single.add_hline(y=leg['target'], line_dash="dash", line_color="yellow", annotation_text=f"Switch")
+                
             fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
             ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
             
+            # 4. LOG (Sim #1)
             with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
                 for l in sim1_log:
                     color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
@@ -269,9 +295,9 @@ def show_career_mode():
                 slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
                 slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
                 
-                # UPDATED MAX TO 1000
+                # NEW SLIDER FOR MULTIVERSE
                 ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
-                slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
+                slider_num_sims = ui.slider(min=10, max=100, value=20).props('color=cyan')
                 ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
                 
                 ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
