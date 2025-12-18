@@ -331,6 +331,58 @@ def show_simulator():
         except Exception as e:
             print(f"Preview Error: {str(e)}")
 
+    # --- QUICK SINGLE REFRESH ---
+    async def refresh_single_universe():
+        try:
+            # Build Config
+            config = {
+                'years': int(slider_years.value),
+                'freq': int(slider_frequency.value),
+                'contrib_win': int(slider_contrib_win.value),
+                'contrib_loss': int(slider_contrib_loss.value),
+                'use_ratchet': switch_ratchet.value,
+                'use_tax': switch_luxury_tax.value,
+                'use_holiday': switch_holiday.value,
+                'hol_ceil': int(slider_holiday_ceil.value),
+                'insolvency': int(slider_insolvency.value),
+                'safety': int(slider_safety.value),
+                'start_ga': int(slider_start_ga.value),
+                'tax_thresh': int(slider_tax_thresh.value),
+                'tax_rate': int(slider_tax_rate.value),
+                'strategy_mode': select_engine_mode.value,
+                'status_target_pts': 0, 'earn_rate': 0 # Not needed for single chart
+            }
+            overrides = StrategyOverrides(
+                iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
+                profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
+                press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
+                tax_rate=config['tax_rate'], bet_strategy=(BetStrategy.BANKER if select_bet_strat.value == 'Banker' else BetStrategy.PLAYER),
+                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value 
+            )
+            
+            # Run 1 Sim
+            res = await asyncio.to_thread(SimulationWorker.run_full_career, 
+                config['start_ga'], config['years']*12, config['freq'],
+                config['contrib_win'], config['contrib_loss'], overrides, 
+                config['use_ratchet'], config['use_tax'], config['use_holiday'], 
+                config['safety'], config['status_target_pts'], config['earn_rate'],
+                config['hol_ceil'], config['insolvency'], config['strategy_mode']
+            )
+            
+            # Plot
+            chart_single_container.clear()
+            with chart_single_container:
+                ui.label('QUICK SINGLE REALITY CHECK').classes('text-xs text-blue-400 font-bold mb-1')
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=res['trajectory'], mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+                fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red")
+                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+
+        except Exception as e:
+            ui.notify(str(e), type='negative')
+
     async def run_sim():
         nonlocal running
         if running: 
@@ -391,6 +443,9 @@ def show_simulator():
             label_stats.set_text("Analyzing Data...")
             render_analysis(all_results, config, start_ga, overrides)
             label_stats.set_text("Simulation Complete")
+            
+            # Refresh single view as well
+            await refresh_single_universe()
 
         except Exception as e:
             print(traceback.format_exc())
@@ -411,7 +466,7 @@ def show_simulator():
         p25_band = np.percentile(trajectories, 25, axis=0)
         p75_band = np.percentile(trajectories, 75, axis=0)
         mean_line = np.mean(trajectories, axis=0)
-        median_line = np.median(trajectories, axis=0) # MEDIAN
+        median_line = np.median(trajectories, axis=0)
         
         avg_final_ga = np.mean([r['final_ga'] for r in results])
         avg_tax = np.mean([r['tax'] for r in results])
@@ -511,6 +566,7 @@ def show_simulator():
                     table_rows = []
                     for entry in y1_log:
                         res_val = entry.get('result', 0)
+                        # We use 'text-green-400' / 'text-red-400' string literals for aggrid cell class if needed
                         table_rows.append({
                             'Month': f"M{entry.get('month', '?')}",
                             'Result': f"€{res_val:+,.0f}",
@@ -546,6 +602,8 @@ def show_simulator():
                 lines.append(" - Drop back to Tier 2 only if < €4,500")
             elif config['strategy_mode'] == 'Fortress':
                 lines.append("FORTRESS MODE: Active (Cap @ 100)")
+            elif config['strategy_mode'] == 'Safe Titan':
+                lines.append("SAFE TITAN: Active (Flat €100 Base)")
             
             lines.append("\n=== PERFORMANCE RESULTS ===")
             lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
@@ -568,8 +626,8 @@ def show_simulator():
 
     # --- MAIN UI ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
-        # TITLE CHANGE: v2.7 (FINAL)
-        ui.label('RESEARCH LAB v2.7 (FINAL)').classes('text-2xl font-light text-blue-300')
+        # TITLE CHANGE: v2.8 (QUICK SINGLE)
+        ui.label('RESEARCH LAB v2.8 (QUICK SINGLE)').classes('text-2xl font-light text-blue-300')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
             
@@ -618,6 +676,7 @@ def show_simulator():
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     
+                    # UPDATED MODE SELECTION (INCLUDING SAFE TITAN)
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
                     with ui.row().classes('w-full justify-between'):
@@ -684,10 +743,12 @@ def show_simulator():
         progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        # ADDED SINGLE CHART CONTAINER
+        chart_single_container = ui.column().classes('w-full mt-4')
+        # Button inside main sim panel
+        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-2')
         
-        # ADDED FLIGHT RECORDER CONTAINER HERE (Visually Distinct)
         flight_recorder_container = ui.column().classes('w-full mb-4')
-        
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
