@@ -59,6 +59,7 @@ class SimulationWorker:
             if decision['mode'] == PlayMode.STOPPED:
                 break
             
+            # Note: In Virtual Mode, bet_amount is 0, so volume won't increase. Correct.
             bet = decision['bet_amount']
             volume += bet
             
@@ -75,7 +76,8 @@ class SimulationWorker:
             if overrides.bet_strategy == BetStrategy.BANKER:
                 prob_win = 0.4586
                 prob_loss = 0.4462
-                payout = 0.95 
+                # CRITICAL FIX: We pass 1.0 here. The Engine applies the 0.95 commission.
+                payout = 1.0 
             else:
                 prob_win = 0.4462
                 prob_loss = 0.4586
@@ -350,7 +352,7 @@ def show_simulator():
                 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value),
                 'strategy_mode': select_engine_mode.value,
-                'status_target_pts': 0, 'earn_rate': 0 # Not needed for single chart
+                'status_target_pts': 0, 'earn_rate': 0 
             }
             overrides = StrategyOverrides(
                 iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
@@ -566,7 +568,6 @@ def show_simulator():
                     table_rows = []
                     for entry in y1_log:
                         res_val = entry.get('result', 0)
-                        # We use 'text-green-400' / 'text-red-400' string literals for aggrid cell class if needed
                         table_rows.append({
                             'Month': f"M{entry.get('month', '?')}",
                             'Result': f"€{res_val:+,.0f}",
