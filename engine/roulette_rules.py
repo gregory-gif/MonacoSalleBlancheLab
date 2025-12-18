@@ -7,8 +7,8 @@ class RouletteBet(Enum):
     BLACK = auto()
     EVEN = auto()
     ODD = auto()
-    LOW = auto()  # Manque (1-18)
-    HIGH = auto() # Passe (19-36)
+    LOW = auto()
+    HIGH = auto()
 
 # Maps winning numbers to bets
 WINNING_NUMBERS = {
@@ -29,18 +29,15 @@ class RouletteSessionState:
     consecutive_losses: int = 0
     current_press_streak: int = 0
     locked_profit: float = -999999.0
-    
-    # NEW: Specific tracker for D'Alembert level (0 to 4)
     dalembert_level: int = 0 
-    
-    mode: str = 'PLAYING' # 'PLAYING', 'STOPPED'
+    mode: str = 'PLAYING' 
 
 class RouletteStrategist:
     @staticmethod
     def get_next_decision(state):
         base_val = state.tier.base_unit
         
-        # 1. STOP LOSS / PROFIT (Standard Checks)
+        # 1. STOP LOSS / PROFIT
         stop_limit = state.tier.stop_loss
         if state.overrides.stop_loss_units > 0:
             stop_limit = -(state.overrides.stop_loss_units * base_val)
@@ -62,34 +59,26 @@ class RouletteStrategist:
             elif curr_u >= 12 and state.locked_profit < (5 * base_val): state.locked_profit = 5 * base_val
             elif curr_u >= 20 and state.locked_profit < (10 * base_val): state.locked_profit = 10 * base_val
 
-        # 2. BET SIZING LOGIC
+        # 2. BET SIZING
         bet = base_val
         press_mode = state.overrides.press_trigger_wins
         
-        # --- NEW OPTION 4: CAPPED D'ALEMBERT ---
+        # --- CAPPED D'ALEMBERT ---
         if press_mode == 4:
-            # state.dalembert_level represents steps above base.
-            # Step size = 1 Base Unit
-            
-            # Dynamic Step Calculation
             step_size = base_val
             bet = base_val + (state.dalembert_level * step_size)
-            
-            # Cap at 5 Units (Base + 4 steps)
-            # Example: Base €10. Steps €10. Max Bet €50.
             max_bet = base_val * 5.0
             
-            # Safety Clamp
             if bet < base_val: bet = base_val
             if bet > max_bet: bet = max_bet
             
-        # --- EXISTING POSITIVE PROGRESSIONS ---
-        elif press_mode == 3: # Progression 1-1.5-2.5 (Titan Style)
+        # --- POSITIVE PROGRESSIONS ---
+        elif press_mode == 3: # Titan
             if state.current_press_streak == 1: bet = base_val * 1.5
             elif state.current_press_streak >= 2: bet = base_val * 2.5
             if state.consecutive_losses >= state.overrides.iron_gate_limit: state.current_press_streak = 0
             
-        elif press_mode > 0: # Standard Press 1 or 2
+        elif press_mode > 0: # Standard
             if state.consecutive_losses >= state.overrides.iron_gate_limit: state.current_press_streak = 0
             if state.current_press_streak >= press_mode:
                 press_steps = min(state.current_press_streak, state.overrides.press_depth)
@@ -98,49 +87,58 @@ class RouletteStrategist:
         return {'mode': 'PLAYING', 'bet': bet, 'reason': 'ACTION'}
 
     @staticmethod
-    def resolve_spin(state, bet_type, bet_amount):
+    def resolve_spin(state, bet_types: list, bet_amount):
+        """
+        Resolves a spin with potential MULTIPLE bets.
+        bet_types: list of RouletteBet enums (e.g., [RED, ODD])
+        """
         number = random.randint(0, 36)
-        won = False
-        pnl_change = 0
         
-        if number == 0:
-            # La Partage
-            pnl_change = -(bet_amount / 2.0)
-            won = False 
-        else:
-            winning_set = WINNING_NUMBERS[bet_type]
-            if number in winning_set:
-                won = True
-                pnl_change = bet_amount
+        net_pnl = 0.0
+        
+        for bt in bet_types:
+            pnl_change = 0
+            if number == 0:
+                # La Partage (Half Loss)
+                pnl_change = -(bet_amount / 2.0)
             else:
-                won = False
-                pnl_change = -bet_amount
+                winning_set = WINNING_NUMBERS[bt]
+                if number in winning_set:
+                    pnl_change = bet_amount
+                else:
+                    pnl_change = -bet_amount
+            net_pnl += pnl_change
 
-        # Update PnL
-        state.session_pnl += pnl_change
+        # Update Session PnL
+        state.session_pnl += net_pnl
         
-        # --- UPDATE STATE FOR NEXT HAND ---
+        # --- UPDATE STATE (PROGRESSIONS) BASED ON NET RESULT ---
+        # Net Win > 0 = Win
+        # Net Win < 0 = Loss
+        # Net Win == 0 = Push (Do not change streaks/levels)
         
-        # D'ALEMBERT LOGIC UPDATER
+        won = (net_pnl > 0)
+        lost = (net_pnl < 0)
+        
+        # D'ALEMBERT UPDATER
         if state.overrides.press_trigger_wins == 4:
             if won:
-                # Win: Decrease level
                 if state.dalembert_level > 0:
                     state.dalembert_level -= 1
-            else:
-                # Lose: Increase level
-                # CRITICAL RULE: If at Cap (Level 4) and Lose, RESET to Floor.
+            elif lost:
                 if state.dalembert_level >= 4:
-                    state.dalembert_level = 0 # The Reset
+                    state.dalembert_level = 0 # Reset at Cap
                 else:
                     state.dalembert_level += 1
+            # If Push (0), level stays same
         
-        # STANDARD STREAK TRACKING (For other modes)
+        # STANDARD STREAK TRACKING
         if won:
             state.consecutive_losses = 0
             state.current_press_streak += 1
-        else:
+        elif lost:
             state.consecutive_losses += 1
-            state.current_press_streak = 0 
+            state.current_press_streak = 0
+        # If Push, maintain streaks
 
-        return number, won, pnl_change
+        return number, won, net_pnl
