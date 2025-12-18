@@ -1,9 +1,10 @@
 from nicegui import ui
-from ui.scorecard import show_scorecard # <--- FIXED IMPORT
+from ui.scorecard import show_scorecard
 from ui.dashboard import show_dashboard
 from ui.simulator import show_simulator
 from ui.session_log import show_session_log
 from ui.career_mode import show_career_mode
+from ui.roulette_sim import show_roulette_sim # <--- NEW IMPORT
 
 # 1. APP CONFIGURATION
 ui.dark_mode().enable()
@@ -14,7 +15,7 @@ content = ui.column().classes('w-full items-center')
 def load_cockpit():
     content.clear()
     with content:
-        show_scorecard() # <--- FIXED FUNCTION CALL
+        show_scorecard()
 
 def load_dashboard():
     content.clear()
@@ -30,6 +31,11 @@ def load_career():
     content.clear()
     with content:
         show_career_mode()
+
+def load_roulette(): # <--- NEW LOADER
+    content.clear()
+    with content:
+        show_roulette_sim()
 
 def load_session_log():
     content.clear()
@@ -56,7 +62,8 @@ with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawe
             
             ui.separator().classes('bg-slate-700 my-2 opacity-50')
             
-            ui.button('LAB SIMULATOR', icon='science', on_click=load_simulator).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+            ui.button('BACCARAT LAB', icon='science', on_click=load_simulator).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+            ui.button('ROULETTE LAB', icon='donut_large', on_click=load_roulette).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700') # <--- NEW
             ui.button('CAREER SIM', icon='route', on_click=load_career).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
         
         ui.separator().classes('bg-slate-700 my-2')
