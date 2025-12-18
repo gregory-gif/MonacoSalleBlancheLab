@@ -1,9 +1,9 @@
 from nicegui import ui
-from ui.scorecard import Scorecard
+from ui.scorecard import scorecard # <--- FIXED: Lowercase import based on error log
 from ui.dashboard import show_dashboard
 from ui.simulator import show_simulator
 from ui.session_log import show_session_log
-from ui.career_mode import show_career_mode  # <--- NEW IMPORT
+from ui.career_mode import show_career_mode
 
 # 1. APP CONFIGURATION
 ui.dark_mode().enable()
@@ -14,7 +14,7 @@ content = ui.column().classes('w-full items-center')
 def load_cockpit():
     content.clear()
     with content:
-        Scorecard()
+        scorecard() # <--- FIXED: Calling the function, not a class
 
 def load_dashboard():
     content.clear()
@@ -26,7 +26,7 @@ def load_simulator():
     with content:
         show_simulator()
 
-def load_career():  # <--- NEW LOADER
+def load_career():
     content.clear()
     with content:
         show_career_mode()
@@ -57,7 +57,6 @@ with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawe
             ui.separator().classes('bg-slate-700 my-2 opacity-50')
             
             ui.button('LAB SIMULATOR', icon='science', on_click=load_simulator).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-            # NEW BUTTON ADDED HERE
             ui.button('CAREER SIM', icon='route', on_click=load_career).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
         
         ui.separator().classes('bg-slate-700 my-2')
