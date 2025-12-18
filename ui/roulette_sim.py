@@ -26,12 +26,18 @@ BET_MAP = {
 
 class RouletteWorker:
     @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str):
+    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 5.0):
+        # We pass base_bet directly to tier generation if needed, but usually tier_map is already built.
+        # However, for penalty mode or dynamic adjustment, we might need it.
+        # Actually, tier_map passed in ALREADY has the correct base bets.
+        
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Roulette')
         
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
-            flat_bet = 5.0 # Monaco Roulette Min
+            flat_bet = base_bet # Use selected base bet for penalty too? Or strictly min?
+            # Standard "Penalty Box" is usually Table Min. Let's keep it consistent.
+            
             tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
@@ -68,9 +74,12 @@ class RouletteWorker:
                         contrib_win, contrib_loss, overrides, use_ratchet,
                         use_tax, use_holiday, safety_factor, target_points, earn_rate,
                         holiday_ceiling, insolvency_floor, strategy_mode,
+                        base_bet_val, # NEW ARGUMENT
                         track_y1_details=False):
         
-        tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Roulette')
+        # GENERATE TIER MAP WITH CUSTOM BASE BET
+        tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Roulette', base_bet=base_bet_val)
+        
         trajectory = []
         current_ga = start_ga
         running_play_pnl = 0
@@ -121,7 +130,7 @@ class RouletteWorker:
                 for _ in range(sessions_this_month):
                     pnl, vol, used_level, spins = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
-                        False, active_level, strategy_mode
+                        False, active_level, strategy_mode, base_bet_val
                     )
                     active_level = used_level 
                     current_ga += pnl
@@ -176,7 +185,8 @@ def show_roulette_sim():
                 'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
                 'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
                 'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
-                'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value
+                'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
+                'tac_base_bet': slider_base_bet.value # NEW SAVE FIELD
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -222,6 +232,10 @@ def show_roulette_sim():
             select_status.value = config.get('gold_stat', 'Gold')
             slider_earn_rate.value = config.get('gold_earn', 10)
             slider_start_ga.value = config.get('start_ga', 2000)
+            
+            # LOAD BASE BET
+            slider_base_bet.value = config.get('tac_base_bet', 5.0)
+            
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
 
@@ -242,7 +256,8 @@ def show_roulette_sim():
         try:
             factor = slider_safety.value
             mode = select_engine_mode.value
-            t_map = generate_tier_map(factor, mode=mode, game_type='Roulette')
+            base = slider_base_bet.value # READ BASE BET
+            t_map = generate_tier_map(factor, mode=mode, game_type='Roulette', base_bet=base)
             
             rows = []
             for level, t in t_map.items():
@@ -266,7 +281,8 @@ def show_roulette_sim():
                 'insolvency': int(slider_insolvency.value), 'safety': int(slider_safety.value),
                 'start_ga': int(slider_start_ga.value), 'tax_thresh': int(slider_tax_thresh.value),
                 'tax_rate': int(slider_tax_rate.value), 'strategy_mode': select_engine_mode.value,
-                'status_target_pts': 0, 'earn_rate': 0
+                'status_target_pts': 0, 'earn_rate': 0,
+                'base_bet': float(slider_base_bet.value) # PASS BASE BET
             }
             overrides = StrategyOverrides(
                 iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
@@ -282,7 +298,8 @@ def show_roulette_sim():
                 config['contrib_win'], config['contrib_loss'], overrides, 
                 config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                 config['safety'], config['status_target_pts'], config['earn_rate'],
-                config['hol_ceil'], config['insolvency'], config['strategy_mode']
+                config['hol_ceil'], config['insolvency'], config['strategy_mode'],
+                config['base_bet']
             )
             
             chart_single_container.clear()
@@ -313,7 +330,8 @@ def show_roulette_sim():
                 'hol_ceil': int(slider_holiday_ceil.value), 'insolvency': int(slider_insolvency.value),
                 'safety': int(slider_safety.value), 'start_ga': int(slider_start_ga.value),
                 'press_depth': int(slider_press_depth.value), 'tax_thresh': int(slider_tax_thresh.value),
-                'tax_rate': int(slider_tax_rate.value), 'strategy_mode': select_engine_mode.value 
+                'tax_rate': int(slider_tax_rate.value), 'strategy_mode': select_engine_mode.value,
+                'base_bet': float(slider_base_bet.value)
             }
             
             overrides = StrategyOverrides(
@@ -340,6 +358,7 @@ def show_roulette_sim():
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
                             config['hol_ceil'], config['insolvency'], config['strategy_mode'],
+                            config['base_bet'], # Pass base bet
                             track_y1_details=should_track
                         )
                         batch_data.append(res)
@@ -449,9 +468,9 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
-            lines = ["=== CONFIGURATION ==="]
+            lines = ["=== ROULETTE CONFIGURATION ==="]
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-            lines.append(f"Betting: {overrides.bet_strategy} | Spins/Sess: {overrides.shoes_per_session * 60}")
+            lines.append(f"Betting: {overrides.bet_strategy} | Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
             lines.append(f"Gold Probability: {gold_prob:.1f}%")
             
             lines.append("\n=== PERFORMANCE RESULTS ===")
@@ -509,6 +528,11 @@ def show_roulette_sim():
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
+                    
+                    # NEW SLIDER FOR BASE BET
+                    with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
+                    slider_base_bet = ui.slider(min=5, max=100, step=5, value=5, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
+                    
                     with ui.row().classes('w-full justify-between'): ui.label('Safety Buffer').classes('text-xs text-orange-400'); lbl_safe = ui.label()
                     slider_safety = ui.slider(min=10, max=60, value=25, on_change=update_ladder_preview).props('color=orange'); lbl_safe.bind_text_from(slider_safety, 'value', lambda v: f'{v}x')
                     
