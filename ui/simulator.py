@@ -414,6 +414,8 @@ def show_simulator():
         p25_band = np.percentile(trajectories, 25, axis=0)
         p75_band = np.percentile(trajectories, 75, axis=0)
         mean_line = np.mean(trajectories, axis=0)
+        # --- ADDED MEDIAN CALCULATION ---
+        median_line = np.median(trajectories, axis=0)
         
         avg_final_ga = np.mean([r['final_ga'] for r in results])
         avg_tax = np.mean([r['tax'] for r in results])
@@ -489,9 +491,15 @@ def show_simulator():
         with chart_container:
             chart_container.clear()
             fig = go.Figure()
+            # Bands
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.5)', line=dict(color='rgba(255,255,255,0.3)', width=1), name='Best/Worst'))
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
+            
+            # Lines
             fig.add_trace(go.Scatter(x=months, y=mean_line, mode='lines', name='Average', line=dict(color='white', width=2)))
+            # --- ADDED MEDIAN LINE TRACE ---
+            fig.add_trace(go.Scatter(x=months, y=median_line, mode='lines', name='Median (Realistic)', line=dict(color='yellow', width=2, dash='dot')))
+            
             fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red", annotation_text="Insolvency")
             if config['use_holiday']: fig.add_hline(y=config['hol_ceil'], line_dash="dash", line_color="yellow", annotation_text="Holiday")
             fig.update_layout(title='Monte Carlo Confidence Bands', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20), xaxis=dict(title='Months Passed', gridcolor='#334155'), yaxis=dict(title='Game Account (€)', gridcolor='#334155'), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
@@ -568,8 +576,8 @@ def show_simulator():
 
     # --- MAIN UI ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
-        # TITLE CHANGE: v2.5 (FINAL FIXED)
-        ui.label('RESEARCH LAB v2.5 (SAFE TITAN)').classes('text-2xl font-light text-blue-300')
+        # TITLE CHANGE: v2.6 (MEDIAN ADDED)
+        ui.label('RESEARCH LAB v2.6 (MEDIAN)').classes('text-2xl font-light text-blue-300')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
             
@@ -618,7 +626,6 @@ def show_simulator():
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     
-                    # UPDATED MODE SELECTION
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
                     with ui.row().classes('w-full justify-between'):
