@@ -22,7 +22,7 @@ def main_page():
     # --- THE GATEKEEPER CHECK ---
     # If the user is NOT authenticated, kick them to login immediately.
     if not app.storage.user.get('authenticated', False):
-        ui.open('/login')
+        ui.navigate.to('/login')
         return # Stop loading the rest of the page!
 
     # --- IF WE PASS, LOAD THE APP ---
