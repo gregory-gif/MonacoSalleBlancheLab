@@ -39,7 +39,7 @@ def show_dashboard():
                 save_profile(profile)
                 ui.notify(f'Wallet updated to €{val:,.0f}', type='positive')
                 # Refresh page to update chart and label
-                ui.open('/') 
+                ui.navigate.to('/') 
         
         with ui.row().classes('w-full justify-end gap-2'):
             ui.button('Cancel', on_click=wallet_dialog.close).props('flat color=grey')
