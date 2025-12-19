@@ -32,4 +32,4 @@ def setup_auth():
     def logout():
         # Clear the session
         app.storage.user['authenticated'] = False
-        ui.open('/login')
+        ui.navigate.to('/login')
