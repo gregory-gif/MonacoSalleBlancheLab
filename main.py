@@ -2,7 +2,7 @@ from nicegui import ui, app
 import traceback
 
 # MODULE IMPORTS
-from auth import AuthMiddleware, setup_auth
+from auth import setup_auth
 from ui.tracker import render_page as show_tracker
 from ui.simulator import show_simulator
 from ui.career_mode import show_career_mode
@@ -11,7 +11,7 @@ from ui.roulette_sim import show_roulette_sim
 # ==============================================================================
 # 1. SECURITY SETUP
 # ==============================================================================
-app.add_middleware(AuthMiddleware)
+# Initialize the login pages
 setup_auth()
 
 # ==============================================================================
@@ -19,6 +19,13 @@ setup_auth()
 # ==============================================================================
 @ui.page('/')
 def main_page():
+    # --- THE GATEKEEPER CHECK ---
+    # If the user is NOT authenticated, kick them to login immediately.
+    if not app.storage.user.get('authenticated', False):
+        ui.open('/login')
+        return # Stop loading the rest of the page!
+
+    # --- IF WE PASS, LOAD THE APP ---
     ui.dark_mode().enable()
     
     # --- Content Container ---
@@ -40,7 +47,7 @@ def main_page():
         ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat color=white')
         ui.label('SALLE BLANCHE LAB').classes('text-xl font-bold tracking-widest ml-2')
         ui.space()
-        ui.button(icon='logout', on_click=lambda: ui.open('/logout')).props('flat color=white round')
+        ui.button(icon='logout', on_click=lambda: ui.open('/logout')).props('flat color=white round').tooltip('Logout')
 
     # --- Sidebar ---
     with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawer:
