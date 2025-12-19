@@ -14,7 +14,7 @@ from engine.strategy_rules import StrategyOverrides
 # SBM LOYALTY TIERS
 SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
-# MAP - ADDED NEW STRATEGIES
+# MAP
 BET_MAP = {
     'Red': RouletteBet.RED,
     'Black': RouletteBet.BLACK,
@@ -67,7 +67,7 @@ class RouletteWorker:
             
             unit_amt = decision['bet']
             
-            # Volume Calc: Strategy 1 is 5 units, Strat 2 is 7 units
+            # Volume Calc
             total_bet_units = 0
             for b in active_bets:
                 if b == RouletteBet.STRAT_SALON_LITE: total_bet_units += 5
@@ -478,9 +478,27 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
+            
+            # --- UPDATED REPORT SECTION ---
+            
+            # Map Press IDs to Names
+            press_map = {
+                0: 'Flat', 
+                1: 'Press 1-Win', 
+                2: 'Press 2-Wins', 
+                3: 'Titan Progression', 
+                4: "Capped D'Alembert", 
+                5: "La Caroline"
+            }
+            press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
+
             lines = ["=== ROULETTE CONFIGURATION ==="]
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-            lines.append(f"Betting: {overrides.bet_strategy} + {overrides.bet_strategy_2} | Base Bet: €{config['base_bet']}")
+            lines.append(f"Betting: {overrides.bet_strategy} + {overrides.bet_strategy_2}")
+            lines.append(f"Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
+            lines.append(f"Press Logic: {press_name} | Safety: {config['safety']}x | Iron Gate: {overrides.iron_gate_limit}")
+            lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+            lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
             lines.append(f"Gold Probability: {gold_prob:.1f}%")
             
             lines.append("\n=== PERFORMANCE RESULTS ===")
