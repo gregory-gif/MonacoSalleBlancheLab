@@ -14,7 +14,7 @@ def setup_auth():
                 # Set the secure session flag
                 app.storage.user['authenticated'] = True
                 # Redirect to home
-                ui.open('/') 
+                ui.navigate.to('/')
             else:
                 ui.notify('Access Denied', type='negative')
 
