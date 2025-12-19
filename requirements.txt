@@ -1,4 +1,5 @@
 nicegui
+pandas
 plotly
 numpy
 pymongo[srv]  # This installs the driver and the DNS extras
