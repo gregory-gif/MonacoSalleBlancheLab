@@ -469,7 +469,8 @@ def show_roulette_sim():
         with flight_recorder_container:
             flight_recorder_container.clear()
             y1_log = results[0].get('y1_log', [])
-            with ui.expansion('YEAR 1 FLIGHT RECORDER (Sim #1)', icon='flight_takeoff', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+            # MODIFIED TITLE AND ICON
+            with ui.expansion('OUR LOG (Year 1 - Sim #1)', icon='history_edu', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
                 if y1_log:
                     table_rows = []
                     for entry in y1_log:
@@ -509,9 +510,10 @@ def show_roulette_sim():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
             
+            # UPDATED HEADER HERE TOO
             y1_log = results[0].get('y1_log', [])
             if y1_log:
-                lines.append("\n=== YEAR 1 DATA (COPY/PASTE) ===")
+                lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
                 for e in y1_log:
                     lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
@@ -583,6 +585,7 @@ def show_roulette_sim():
                     
                     slider_shoes = ui.slider(min=1, max=5, value=2).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v*60} Spins (approx {v} hours)')
                     
+                    # UPDATED RANGES: 0-100 for Stop/Profit
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=3, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
@@ -592,12 +595,15 @@ def show_roulette_sim():
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
+                    
+                    # UPDATED RANGE: 2-10 for Iron Gate
                     slider_iron_gate = ui.slider(min=2, max=10, value=3).props('color=purple'); ui.label().bind_text_from(slider_iron_gate, 'value', lambda v: f'Iron Gate {v}')
 
             ui.separator().classes('bg-slate-700')
             with ui.row().classes('w-full items-center justify-between'):
                 with ui.column():
                      ui.label('Starting Capital').classes('text-xs text-green-400')
+                     # UPDATED RANGE: 0-10000
                      slider_start_ga = ui.slider(min=0, max=10000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
                      with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=20, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
