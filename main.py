@@ -1,22 +1,29 @@
 from nicegui import ui
 import traceback
 
+# ==============================================================================
 # MODULE IMPORTS
-from ui.scorecard import show_scorecard
+# ==============================================================================
+# We import the new Tracker as 'show_tracker' for consistency
+from ui.tracker import render_page as show_tracker  
 from ui.dashboard import show_dashboard
 from ui.simulator import show_simulator
-from ui.session_log import show_session_log
 from ui.career_mode import show_career_mode
 from ui.roulette_sim import show_roulette_sim
 
+# ==============================================================================
 # 1. APP CONFIGURATION
+# ==============================================================================
 ui.dark_mode().enable()
 
+# ==============================================================================
 # 2. CONTENT CONTAINER
+# ==============================================================================
+# This container holds the active page content
 content = ui.column().classes('w-full items-center')
 
 # --- SAFE LOADER DECORATOR ---
-# This prevents the "White Page of Death" by catching errors during page load
+# Prevents the "White Page of Death" by catching errors during module loading
 def safe_load(func):
     def wrapper():
         content.clear()
@@ -32,31 +39,36 @@ def safe_load(func):
                 ui.label("Check server logs for details.").classes('text-slate-500')
     return wrapper
 
+# --- PAGE LOADERS ---
+
 @safe_load
-def load_cockpit():
-    show_scorecard()
+def load_tracker():
+    # This is the new "Captain's Log" (Tracker + Ledger)
+    show_tracker()
 
 @safe_load
 def load_dashboard():
+    # Existing financial dashboard
     show_dashboard()
 
 @safe_load
 def load_simulator():
+    # Baccarat Simulator
     show_simulator()
 
 @safe_load
 def load_career():
+    # Career/Life Simulator
     show_career_mode()
 
 @safe_load
 def load_roulette():
+    # Roulette Simulator
     show_roulette_sim()
 
-@safe_load
-def load_session_log():
-    show_session_log()
-
+# ==============================================================================
 # 3. LAYOUT & SIDEBAR
+# ==============================================================================
 with ui.header().classes('bg-slate-900 text-white shadow-lg items-center'):
     ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat color=white')
     ui.label('SALLE BLANCHE LAB').classes('text-xl font-bold tracking-widest ml-2')
@@ -68,12 +80,13 @@ with ui.header().classes('bg-slate-900 text-white shadow-lg items-center'):
 with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawer:
     with ui.column().classes('w-full p-4 gap-4'):
         
-        ui.label('MODULES').classes('text-slate-500 text-xs font-bold tracking-wider')
+        ui.label('OPERATIONS').classes('text-slate-500 text-xs font-bold tracking-wider')
         with ui.column().classes('gap-2 w-full'):
             # NAVIGATION
-            ui.button('LIVE COCKPIT', icon='casino', on_click=load_cockpit).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-            ui.button('DASHBOARD', icon='analytics', on_click=load_dashboard).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-            ui.button('SESSION LOG', icon='history', on_click=load_session_log).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+            # New Home Page: Captain's Log
+            ui.button("CAPTAIN'S LOG", icon='edit_note', on_click=load_tracker).props('flat align=left').classes('w-full text-amber-400 font-bold bg-slate-700/50 hover:bg-slate-700')
+            
+            ui.button('FINANCIALS', icon='analytics', on_click=load_dashboard).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
             
             ui.separator().classes('bg-slate-700 my-2 opacity-50')
             
@@ -89,8 +102,11 @@ with ui.left_drawer(value=True).classes('bg-slate-800 text-white') as left_drawe
         with ui.card().classes('bg-slate-900 w-full p-3 border-l-4 border-blue-500'):
             ui.label('"Reset to Base"').classes('text-xs italic text-slate-300')
 
-# 4. INITIAL STARTUP - Load Cockpit first (It is verified safe)
-load_cockpit()
+# ==============================================================================
+# 4. INITIAL STARTUP
+# ==============================================================================
+# Load the Tracker immediately (No more Live Cockpit)
+load_tracker()
 
 if __name__ in {"__main__", "__mp_main__"}:
     ui.run(title='Salle Blanche Lab', port=8080, reload=True, favicon='♠️', show=True)
