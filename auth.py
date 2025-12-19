@@ -9,11 +9,12 @@ def setup_auth():
     
     @ui.page('/login')
     def login_page():
-        def try_login():
+        # FIX: Added 'e=None' to accept the event argument from the Enter key
+        def try_login(e=None):
             if username.value == USERNAME and password.value == PASSWORD:
                 # Set the secure session flag
                 app.storage.user['authenticated'] = True
-                # Redirect to home
+                # Redirect to home (Corrected from ui.open)
                 ui.navigate.to('/')
             else:
                 ui.notify('Access Denied', type='negative')
@@ -24,7 +25,10 @@ def setup_auth():
             ui.label('Restricted Access').classes('text-slate-500 text-sm mb-6 self-center')
             
             username = ui.input('Username').props('dark outlined').classes('w-full')
-            password = ui.input('Password', password=True).props('dark outlined').classes('w-full').on('keydown.enter', try_login)
+            
+            # Now safe to pass try_login because it accepts the event argument
+            password = ui.input('Password', password=True).props('dark outlined').classes('w-full') \
+                .on('keydown.enter', try_login)
             
             ui.button('UNLOCK', on_click=try_login).classes('w-full mt-6 bg-amber-600 hover:bg-amber-500 text-white font-bold')
 
