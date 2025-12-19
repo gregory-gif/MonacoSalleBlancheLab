@@ -153,7 +153,7 @@ def show_scorecard():
     def finish_session():
         session.save_and_quit()
         ui.notify('Session Saved', type='info')
-        ui.open('/') 
+        ui.navigate.to('/') 
 
     # --- UI ---
     with ui.column().classes('w-full max-w-xl mx-auto p-4 gap-4'):
