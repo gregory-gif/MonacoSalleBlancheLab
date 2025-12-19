@@ -279,6 +279,7 @@ def show_roulette_sim():
         except Exception as e:
             pass 
 
+    # --- QUICK REFRESH ---
     async def refresh_single_universe():
         try:
             config = {
@@ -480,8 +481,6 @@ def show_roulette_sim():
             report_container.clear()
             
             # --- UPDATED REPORT SECTION ---
-            
-            # Map Press IDs to Names
             press_map = {
                 0: 'Flat', 
                 1: 'Press 1-Win', 
@@ -557,7 +556,6 @@ def show_roulette_sim():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
-                    # NEW SLIDER FOR BASE BET
                     with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
                     slider_base_bet = ui.slider(min=5, max=100, step=5, value=5, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
                     
@@ -577,18 +575,16 @@ def show_roulette_sim():
                 with ui.column():
                     ui.label('ROULETTE GAMEPLAY').classes('font-bold text-red-400')
                     
-                    # BET 1
                     select_bet_strat = ui.select(list(BET_MAP.keys()), value='Red', label='Bet Selection (1)').classes('w-full')
                     
-                    # BET 2 (NEW)
                     bet_opts = list(BET_MAP.keys())
-                    bet_opts.insert(0, None) # Allow None
+                    bet_opts.insert(0, None)
                     select_bet_strat_2 = ui.select(bet_opts, label='Bet Selection (2)').classes('w-full')
                     
                     slider_shoes = ui.slider(min=1, max=5, value=2).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v*60} Spins (approx {v} hours)')
                     
-                    slider_stop_loss = ui.slider(min=0, max=50, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
-                    slider_profit = ui.slider(min=3, max=50, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
+                    slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
+                    slider_profit = ui.slider(min=3, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
@@ -596,13 +592,13 @@ def show_roulette_sim():
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
-                    slider_iron_gate = ui.slider(min=2, max=6, value=3).props('color=purple'); ui.label().bind_text_from(slider_iron_gate, 'value', lambda v: f'Iron Gate {v}')
+                    slider_iron_gate = ui.slider(min=2, max=10, value=3).props('color=purple'); ui.label().bind_text_from(slider_iron_gate, 'value', lambda v: f'Iron Gate {v}')
 
             ui.separator().classes('bg-slate-700')
             with ui.row().classes('w-full items-center justify-between'):
                 with ui.column():
                      ui.label('Starting Capital').classes('text-xs text-green-400')
-                     slider_start_ga = ui.slider(min=1000, max=10000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
+                     slider_start_ga = ui.slider(min=0, max=10000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
                      with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=20, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
