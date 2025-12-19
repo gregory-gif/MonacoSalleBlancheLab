@@ -14,14 +14,16 @@ from engine.strategy_rules import StrategyOverrides
 # SBM LOYALTY TIERS
 SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
-# MAP
+# MAP - ADDED NEW STRATEGIES
 BET_MAP = {
     'Red': RouletteBet.RED,
     'Black': RouletteBet.BLACK,
     'Even': RouletteBet.EVEN,
     'Odd': RouletteBet.ODD,
     '1-18': RouletteBet.LOW,
-    '19-36': RouletteBet.HIGH
+    '19-36': RouletteBet.HIGH,
+    'Strategy 1: Salon Privé Lite': RouletteBet.STRAT_SALON_LITE,
+    'Strategy 2: French Main Game': RouletteBet.STRAT_FRENCH_LITE
 }
 
 class RouletteWorker:
@@ -37,7 +39,7 @@ class RouletteWorker:
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
                 profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
                 bet_strategy=overrides.bet_strategy, 
-                bet_strategy_2=overrides.bet_strategy_2, # PASS 2nd BET
+                bet_strategy_2=overrides.bet_strategy_2,
                 press_trigger_wins=999, press_depth=0, ratchet_enabled=False 
             )
         else:
@@ -52,12 +54,9 @@ class RouletteWorker:
         spins_limit = overrides.shoes_per_session * 60 
         volume = 0
         
-        # PREPARE BET LIST
         active_bets = []
-        # Bet 1
         b1 = BET_MAP.get(overrides.bet_strategy, RouletteBet.RED)
         active_bets.append(b1)
-        # Bet 2
         if overrides.bet_strategy_2 and overrides.bet_strategy_2 in BET_MAP:
             b2 = BET_MAP.get(overrides.bet_strategy_2)
             active_bets.append(b2)
@@ -66,10 +65,16 @@ class RouletteWorker:
             decision = RouletteStrategist.get_next_decision(state)
             if decision['mode'] == 'STOPPED': break
             
-            # Bet amount applies to EACH active bet
             unit_amt = decision['bet']
-            total_bet = unit_amt * len(active_bets)
-            volume += total_bet
+            
+            # Volume Calc: Strategy 1 is 5 units, Strat 2 is 7 units
+            total_bet_units = 0
+            for b in active_bets:
+                if b == RouletteBet.STRAT_SALON_LITE: total_bet_units += 5
+                elif b == RouletteBet.STRAT_FRENCH_LITE: total_bet_units += 7
+                else: total_bet_units += 1
+            
+            volume += (unit_amt * total_bet_units)
             
             number, won, pnl = RouletteStrategist.resolve_spin(state, active_bets, unit_amt)
             state.current_spin += 1
@@ -106,14 +111,12 @@ class RouletteWorker:
             if m > 0 and m % 12 == 0:
                 current_year_points = 0
 
-            # Tax Logic
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
                 tax_amt = surplus * (overrides.tax_rate / 100.0)
                 current_ga -= tax_amt
                 m_tax += tax_amt
 
-            # Contribution
             should_contribute = True
             if use_holiday and current_ga >= holiday_ceiling: should_contribute = False
             
@@ -122,7 +125,6 @@ class RouletteWorker:
                 current_ga += amount
                 m_contrib += amount
             
-            # Insolvency
             can_play = (current_ga >= insolvency_floor)
             if not can_play:
                 m_insolvent_months += 1
@@ -187,7 +189,7 @@ def show_roulette_sim():
                 'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
                 'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
                 'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
-                'tac_bet_2': select_bet_strat_2.value, # NEW SAVE FIELD
+                'tac_bet_2': select_bet_strat_2.value,
                 'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
                 'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
                 'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
@@ -229,7 +231,6 @@ def show_roulette_sim():
             if bet_val not in BET_MAP: bet_val = 'Red'
             select_bet_strat.value = bet_val
             
-            # LOAD BET 2
             bet_2_val = config.get('tac_bet_2', None)
             select_bet_strat_2.value = bet_2_val
             
@@ -278,7 +279,6 @@ def show_roulette_sim():
         except Exception as e:
             pass 
 
-    # --- QUICK REFRESH ---
     async def refresh_single_universe():
         try:
             config = {
@@ -297,7 +297,7 @@ def show_roulette_sim():
                 profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
-                bet_strategy_2=select_bet_strat_2.value, # PASS 2nd BET
+                bet_strategy_2=select_bet_strat_2.value,
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value 
             )
@@ -348,7 +348,7 @@ def show_roulette_sim():
                 profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
-                bet_strategy_2=select_bet_strat_2.value, # PASS 2nd BET
+                bet_strategy_2=select_bet_strat_2.value,
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value 
             )
@@ -368,7 +368,7 @@ def show_roulette_sim():
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
                             config['hol_ceil'], config['insolvency'], config['strategy_mode'],
-                            config['base_bet'], # Pass base bet
+                            config['base_bet'], 
                             track_y1_details=should_track
                         )
                         batch_data.append(res)
@@ -574,7 +574,7 @@ def show_roulette_sim():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
