@@ -370,6 +370,57 @@ def show_roulette_sim():
         except Exception as e:
             pass 
 
+    # --- QUICK REFRESH ---
+    async def refresh_single_universe():
+        try:
+            config = {
+                'years': int(slider_years.value), 'freq': int(slider_frequency.value),
+                'contrib_win': int(slider_contrib_win.value), 'contrib_loss': int(slider_contrib_loss.value),
+                'use_ratchet': switch_ratchet.value, 'use_tax': switch_luxury_tax.value,
+                'use_holiday': switch_holiday.value, 'hol_ceil': int(slider_holiday_ceil.value),
+                'insolvency': int(slider_insolvency.value), 'safety': int(slider_safety.value),
+                'start_ga': int(slider_start_ga.value), 'tax_thresh': int(slider_tax_thresh.value),
+                'tax_rate': int(slider_tax_rate.value), 'strategy_mode': select_engine_mode.value,
+                'status_target_pts': 0, 'earn_rate': 0,
+                'base_bet': float(slider_base_bet.value) 
+            }
+            overrides = StrategyOverrides(
+                iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
+                profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
+                press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
+                tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
+                bet_strategy_2=select_bet_strat_2.value,
+                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                
+                # SPICE
+                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=10,
+                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=10
+            )
+            
+            res = await asyncio.to_thread(RouletteWorker.run_full_career, 
+                config['start_ga'], config['years']*12, config['freq'],
+                config['contrib_win'], config['contrib_loss'], overrides, 
+                config['use_ratchet'], config['use_tax'], config['use_holiday'], 
+                config['safety'], config['status_target_pts'], config['earn_rate'],
+                config['hol_ceil'], config['insolvency'], config['strategy_mode'],
+                config['base_bet']
+            )
+            
+            chart_single_container.clear()
+            with chart_single_container:
+                ui.label('QUICK ROULETTE REALITY CHECK').classes('text-xs text-red-400 font-bold mb-1')
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=res['trajectory'], mode='lines', name='Balance', line=dict(color='#ef4444', width=2)))
+                fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red")
+                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+
+        except Exception as e:
+            ui.notify(str(e), type='negative')
+
     async def run_sim():
         nonlocal running
         if running: return
@@ -539,7 +590,6 @@ def show_roulette_sim():
             lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
             lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
             
-            y1_log = all_results[0].get('y1_log', [])
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
@@ -581,7 +631,6 @@ def show_roulette_sim():
 
             ui.separator().classes('bg-slate-700')
 
-            # NEW SPICE LAB SECTION
             with ui.card().classes('w-full bg-slate-800 p-4 border border-pink-500 mb-4'):
                 ui.label('SPICE LAB (Dynamic Add-on Bets)').classes('font-bold text-pink-400 mb-2')
                 with ui.row().classes('w-full gap-8'):
