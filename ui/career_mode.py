@@ -1,209 +1,390 @@
 from nicegui import ui
 import plotly.graph_objects as go
 import numpy as np
-from datetime import datetime
 import asyncio
+import traceback
+from copy import deepcopy
 
-# WORKERS
-from ui.simulator import BaccaratWorker 
+# --- CRITICAL INTEGRATION: IMPORT BOTH WORKERS ---
+from ui.simulator import SimulationWorker
 from ui.roulette_sim import RouletteWorker
+from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
+from engine.tier_params import get_tier_for_ga, generate_tier_map
+from utils.persistence import load_profile
 
-# ENGINE
-from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
-from utils.persistence import load_profile, save_profile
-from engine.strategy_rules import StrategyOverrides, BetStrategy
+# List of Roulette-specific bets to detect Game Type
+ROULETTE_BETS = {'Red', 'Black', 'Even', 'Odd', '1-18', '19-36'}
 
-# SBM LOYALTY TIERS
-SBM_TIERS = {
-    'Silver': {'points': 5000, 'color': '#C0C0C0'},
-    'Gold': {'points': 22500, 'color': '#FFD700'},
-    'Platinum': {'points': 175000, 'color': '#E5E4E2'}
-}
-
-def show_career_mode():
-    profile = load_profile()
-    
-    # 1. LOAD SAVED STRATEGIES (To use "Good" settings instead of defaults)
-    saved_strategies = profile.get('saved_strategies', {})
-    strategy_options = list(saved_strategies.keys()) if saved_strategies else ['Default (Safe)']
-    
-    # Career State
-    career_state = {
-        'game_type': 'Baccarat', 
-        'current_month': profile.get('career_month', 1),
-        'current_ga': profile.get('bankroll', 2000),
-        'status_points': profile.get('status_points', 0),
-        'history': profile.get('career_history', []),
-        'is_running': False,
-        'active_level': 1 # Tracks ladder progress
-    }
-
-    # --- UI COMPONENTS ---
-    with ui.column().classes('w-full max-w-4xl mx-auto p-4 gap-6'):
+class CareerManager:
+    @staticmethod
+    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year):
+        current_ga = start_ga
+        current_leg_idx = 0
         
-        # HEADER
-        with ui.card().classes('w-full bg-slate-900 p-6 border-l-8 border-yellow-500'):
-            with ui.row().classes('w-full items-center justify-between'):
-                with ui.column():
-                    ui.label('MY MONACO CAREER').classes('text-xs text-slate-400 font-bold tracking-widest')
-                    lbl_status = ui.label('WHITE MEMBER').classes('text-3xl font-black text-white')
-                    lbl_points = ui.label('0 / 5,000 Points').classes('text-sm text-yellow-500 font-bold')
-                with ui.column().classes('items-end'):
-                    lbl_ga = ui.label(f"€{career_state['current_ga']:,.0f}").classes('text-4xl font-black text-green-400')
-                    ui.label('General Account (GA)').classes('text-xs text-slate-500')
-            progress_bar = ui.linear_progress(value=0.0).props('color=yellow track-color=grey-8').classes('mt-4 h-4 rounded-full')
-
-        # CONTROLS
-        with ui.grid(columns=2).classes('w-full gap-6'):
-            # MISSION CARD
-            with ui.card().classes('w-full bg-slate-800 p-4'):
-                ui.label('MONTHLY MISSION').classes('font-bold text-white mb-4')
-                
-                # Game & Strategy Selector
-                select_game = ui.select(['Baccarat', 'Roulette'], value='Baccarat', label='Game').classes('w-full')
-                select_strat = ui.select(strategy_options, value=strategy_options[0] if strategy_options else None, label='Active Strategy').classes('w-full')
-                
-                slider_sessions = ui.slider(min=1, max=20, value=4).props('label-always color=cyan')
-                ui.label('Sessions this Month').classes('text-xs text-slate-400 mb-4')
-                
-                ui.separator().classes('bg-slate-700 mb-4')
-                ui.label('CASHFLOW').classes('font-bold text-green-400 mb-2')
-                num_contrib = ui.number(label='Deposit (€)', value=300, step=50).classes('w-full')
-
-            # LOG & ACTION
-            with ui.column().classes('justify-between gap-4'):
-                log_container = ui.scroll_area().classes('w-full h-48 bg-black rounded p-2 text-xs font-mono text-green-300 border border-slate-700')
-                btn_play_month = ui.button('PLAY NEXT MONTH', on_click=lambda: run_month()).props('icon=play_arrow color=yellow text-color=black size=xl').classes('w-full shadow-lg')
-
-    # --- LOGIC ---
-    def get_strategy_config(name):
-        # Pulls the exact settings you saved in the Simulator
-        if not name or name not in saved_strategies:
-            # Fallback safe default
-            return StrategyOverrides(iron_gate_limit=2, stop_loss_units=20, profit_lock_units=10, bet_strategy=BetStrategy.BANKER, shoes_per_session=2)
+        # Load Initial Strategy
+        active_config = sequence_config[0]['config']
+        active_strategy_name = sequence_config[0]['strategy_name']
+        active_target = sequence_config[0]['target_ga']
         
-        cfg = saved_strategies[name]
+        # Extract Params & Detect Game Type
+        overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type = CareerManager._extract_params(active_config)
         
-        # reconstruct overrides object from dict
-        return StrategyOverrides(
-            iron_gate_limit=cfg.get('tac_iron', 2),
-            stop_loss_units=cfg.get('risk_stop', 20),
-            profit_lock_units=cfg.get('risk_prof', 10),
-            bet_strategy=getattr(BetStrategy, cfg.get('tac_bet', 'BANKER')) if 'tac_bet' in cfg and cfg['tac_bet'] in BetStrategy.__members__ else cfg.get('tac_bet', 'Red'),
-            bet_strategy_2=cfg.get('tac_bet_2', None),
-            shoes_per_session=cfg.get('tac_shoes', 2),
-            press_trigger_wins=cfg.get('tac_press', 1),
-            press_depth=cfg.get('tac_depth', 3),
-            ratchet_enabled=cfg.get('risk_ratch', False),
-            ratchet_mode=cfg.get('risk_ratch_mode', 'Standard'),
-            penalty_box_enabled=cfg.get('tac_penalty', True),
-            
-            # Roulette Spices
-            spice_zero_enabled=cfg.get('spice_zero_en', False),
-            spice_zero_trigger=cfg.get('spice_zero_trig', 15),
-            spice_zero_max=cfg.get('spice_zero_max', 100),
-            spice_zero_cooldown=cfg.get('spice_zero_cool', 1),
-            spice_tiers_enabled=cfg.get('spice_tiers_en', False),
-            spice_tiers_trigger=cfg.get('spice_tiers_trig', 25),
-            spice_tiers_max=cfg.get('spice_tiers_max', 100),
-            spice_tiers_cooldown=cfg.get('spice_tiers_cool', 1)
-        )
-
-    async def run_month():
-        if career_state['is_running']: return
-        career_state['is_running'] = True
-        btn_play_month.disable()
+        trajectory = []
+        log = []
+        months = total_years * 12
+        active_level = 1
+        last_session_won = False
         
-        try:
-            # 1. Deposit
-            deposit = float(num_contrib.value)
-            career_state['current_ga'] += deposit
-            log(f"Month {career_state['current_month']}: Deposited €{deposit}")
-            
-            # 2. Setup Physics
-            game = select_game.value
-            strat_name = select_strat.value
-            overrides = get_strategy_config(strat_name)
-            
-            # Get saved base bet or default
-            saved_cfg = saved_strategies.get(strat_name, {})
-            base_bet = saved_cfg.get('tac_base_bet', 10.0) if saved_cfg else 10.0
-            mode = saved_cfg.get('tac_mode', 'Standard') if saved_cfg else 'Standard'
-            
-            # Generate Tier Map
-            tier_map = generate_tier_map(safety_factor=25, mode=mode, game_type=game, base_bet=base_bet)
-            
-            # Determine Starting Tier
-            start_tier = get_tier_for_ga(career_state['current_ga'], tier_map, 1, mode, game)
-            active_level = start_tier.level
-            
-            sessions = int(slider_sessions.value)
-            monthly_pnl = 0
-            monthly_points = 0
-            
-            log(f"Executing '{strat_name}' ({sessions} sessions)...")
+        total_input = start_ga
+        
+        for m in range(months):
+            # 1. CHECK FOR PROMOTION
+            if current_leg_idx < len(sequence_config) - 1:
+                if current_ga >= active_target:
+                    current_leg_idx += 1
+                    new_leg = sequence_config[current_leg_idx]
+                    
+                    log.append({
+                        'month': m+1, 
+                        'event': 'PROMOTION', 
+                        'details': f"GRADUATED: {active_strategy_name} -> {new_leg['strategy_name']} (Bal: €{current_ga:,.0f})"
+                    })
+                    
+                    active_strategy_name = new_leg['strategy_name']
+                    active_config = new_leg['config']
+                    active_target = new_leg['target_ga']
+                    
+                    # Refresh Params for new Leg
+                    overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type = CareerManager._extract_params(active_config)
+                    
+                    # Reset Tier Level based on new map
+                    temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
+                    active_level = temp_tier.level
 
-            for s in range(sessions):
-                await asyncio.sleep(0.1) 
-                
-                # RUN THE REAL WORKER (Same as Simulator)
-                if game == 'Baccarat':
-                    pnl, vol, level, hands = BaccaratWorker.run_session(
-                        career_state['current_ga'], overrides, tier_map, 
-                        overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet
+            # 2. ECOSYSTEM (Tax/Contrib)
+            tax_rate = active_config.get('eco_tax_rate', 25)
+            tax_thresh = active_config.get('eco_tax_thresh', 12500)
+            use_tax = active_config.get('eco_tax', False)
+            
+            if use_tax and current_ga > tax_thresh:
+                tax = (current_ga - tax_thresh) * (tax_rate / 100.0)
+                current_ga -= tax
+
+            contrib_win = active_config.get('eco_win', 300)
+            contrib_loss = active_config.get('eco_loss', 300)
+            hol_ceil = active_config.get('eco_hol_ceil', 10000)
+            use_hol = active_config.get('eco_hol', False)
+            
+            should_contribute = True
+            if use_hol and current_ga >= hol_ceil:
+                should_contribute = False
+            
+            if should_contribute:
+                amount = contrib_win if last_session_won else contrib_loss
+                current_ga += amount
+                total_input += amount 
+            
+            # 3. INSOLVENCY CHECK
+            insolvency_floor = active_config.get('eco_insolvency', 1000)
+            if current_ga < insolvency_floor:
+                if len(log) == 0 or log[-1]['event'] != 'INSOLVENT':
+                    log.append({'month': m+1, 'event': 'INSOLVENT', 'details': f'Bankroll < €{insolvency_floor}. Game Over.'})
+                trajectory.append(current_ga)
+                continue 
+
+            # 4. PLAY SESSIONS (DYNAMIC ENGINE SELECTION)
+            sessions_this_month = sessions_per_year // 12
+            if m % 12 < (sessions_per_year % 12): 
+                sessions_this_month += 1
+            
+            for _ in range(sessions_this_month):
+                if game_type == 'Roulette':
+                    # --- ROULETTE ENGINE ---
+                    pnl, vol, used_lvl, hands = RouletteWorker.run_session(
+                        current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode
                     )
                 else:
-                    pnl, vol, level, hands, z, t = RouletteWorker.run_session(
-                        career_state['current_ga'], overrides, tier_map, 
-                        overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet
+                    # --- BACCARAT ENGINE ---
+                    pnl, vol, used_lvl, hands = SimulationWorker.run_session(
+                        current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode
                     )
-
-                monthly_pnl += pnl
-                career_state['current_ga'] += pnl
                 
-                # Points (10 EUR = 1 Pt approx)
-                points = vol * 0.1 
-                monthly_points += points
-                active_level = level 
+                current_ga += pnl
+                active_level = used_lvl 
+                last_session_won = (pnl > 0)
+            
+            trajectory.append(current_ga)
+            
+            if m % 12 == 0:
+                log.append({
+                    'month': m+1, 
+                    'event': 'STATUS', 
+                    'details': f"Year {(m//12)+1} | €{current_ga:,.0f} | {active_strategy_name} ({game_type})"
+                })
 
-            # 3. Commit
-            career_state['status_points'] += monthly_points
+        return trajectory, log, current_ga, total_input
+
+    @staticmethod
+    def _extract_params(config):
+        mode = config.get('tac_mode', 'Standard')
+        safety = config.get('tac_safety', 25)
+        
+        # 1. Detect Game Type
+        bet_val = config.get('tac_bet', 'Banker')
+        game_type = 'Roulette' if bet_val in ROULETTE_BETS else 'Baccarat'
+        
+        # 2. Generate appropriate Tier Map
+        tier_map = generate_tier_map(safety, mode=mode, game_type=game_type)
+        
+        # 3. Handle Bet Strategy Object
+        if game_type == 'Baccarat':
+            bet_strat_obj = BetStrategy.BANKER if bet_val == 'Banker' else BetStrategy.PLAYER
+        else:
+            # For Roulette, we pass the string directly (e.g., 'Red')
+            # The RouletteWorker knows how to handle the string.
+            bet_strat_obj = bet_val 
+
+        overrides = StrategyOverrides(
+            iron_gate_limit=config.get('tac_iron', 3),
+            stop_loss_units=config.get('risk_stop', 10),
+            profit_lock_units=config.get('risk_prof', 10),
+            press_trigger_wins=config.get('tac_press', 1),
+            press_depth=config.get('tac_depth', 3),
+            ratchet_enabled=config.get('risk_ratch', False),
+            ratchet_mode=config.get('risk_ratch_mode', 'Standard'),
+            shoes_per_session=config.get('tac_shoes', 3),
+            bet_strategy=bet_strat_obj,
+            penalty_box_enabled=config.get('tac_penalty', True)
+        )
+        use_ratchet = config.get('risk_ratch', False)
+        penalty_mode = config.get('tac_penalty', True)
+        
+        return overrides, tier_map, safety, mode, use_ratchet, penalty_mode, game_type
+
+def show_career_mode():
+    
+    legs = [] 
+    
+    def refresh_leg_ui():
+        legs_container.clear()
+        with legs_container:
+            for i, leg in enumerate(legs):
+                with ui.card().classes('w-full bg-slate-800 p-2 mb-2'):
+                    with ui.row().classes('items-center justify-between w-full'):
+                        ui.label(f"LEG {i+1}: {leg['strategy']}").classes('text-lg font-bold text-white')
+                        ui.button(icon='delete', on_click=lambda idx=i: remove_leg(idx)).props('flat color=red dense')
+                    
+                    if i < len(legs) - 1:
+                        ui.label(f"Play until Bankroll >= €{leg['target']:,.0f}").classes('text-sm text-yellow-400')
+                        ui.icon('arrow_downward').classes('text-slate-500 mx-auto my-1')
+                    else:
+                        ui.label("Final Leg (Plays until End of Time)").classes('text-sm text-green-400')
+
+    def add_leg():
+        strat = select_strat.value
+        target = slider_target.value
+        if not strat:
+            ui.notify('Please select a strategy first', type='warning')
+            return
+        legs.append({'strategy': strat, 'target': target})
+        refresh_leg_ui()
+
+    def remove_leg(index):
+        legs.pop(index)
+        refresh_leg_ui()
+
+    # --- QUICK SINGLE REFRESH ---
+    async def refresh_single_career():
+        if not legs: return
+        try:
+            profile = load_profile()
+            saved_strats = profile.get('saved_strategies', {})
+            sequence_config = []
+            for leg in legs:
+                cfg = saved_strats.get(leg['strategy'])
+                sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
             
-            # Update Profile
-            profile['bankroll'] = career_state['current_ga']
-            profile['status_points'] = career_state['status_points']
-            profile['career_month'] = career_state['current_month'] + 1
-            save_profile(profile)
+            traj, log, final, total_in = await asyncio.to_thread(
+                CareerManager.run_compound_career, sequence_config, slider_start_ga.value, slider_years.value, slider_freq.value
+            )
             
-            update_status_display()
-            log(f"RESULT: PnL: €{monthly_pnl:+,.0f} | Points: +{monthly_points:,.0f}")
-            log(f"End Balance: €{career_state['current_ga']:,.0f}")
-            
-            career_state['current_month'] += 1
+            chart_single_container.clear()
+            with chart_single_container:
+                res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
+                ui.label(f"Single Result: €{final:,.0f}").classes(f'text-lg font-bold {res_color} mb-1')
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+                for leg in legs[:-1]:
+                    fig.add_hline(y=leg['target'], line_dash="dash", line_color="yellow")
+                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
 
         except Exception as e:
-            ui.notify(f"Error: {str(e)}", type='negative')
-            print(traceback.format_exc())
-        finally:
-            career_state['is_running'] = False
-            btn_play_month.enable()
+            ui.notify(str(e), type='negative')
 
-    def update_status_display():
-        pts = career_state['status_points']
-        if pts >= SBM_TIERS['Platinum']['points']: lvl, col, target = 'PLATINUM', 'text-slate-200', 999999
-        elif pts >= SBM_TIERS['Gold']['points']: lvl, col, target = 'GOLD', 'text-yellow-400', SBM_TIERS['Platinum']['points']
-        elif pts >= SBM_TIERS['Silver']['points']: lvl, col, target = 'SILVER', 'text-gray-400', SBM_TIERS['Gold']['points']
-        else: lvl, col, target = 'WHITE', 'text-white', SBM_TIERS['Silver']['points']
+    async def run_simulation():
+        if not legs:
+            ui.notify('Add at least one Strategy Leg!', type='negative')
+            return
             
-        lbl_status.set_text(f"{lvl} MEMBER")
-        lbl_status.classes(replace=col)
-        lbl_points.set_text(f"{pts:,.0f} / {target:,.0f} Points")
-        progress_bar.set_value(min(1.0, pts / target))
-        lbl_ga.set_text(f"€{career_state['current_ga']:,.0f}")
+        progress.set_visibility(True)
+        results_area.clear()
+        
+        profile = load_profile()
+        saved_strats = profile.get('saved_strategies', {})
+        sequence_config = []
+        for leg in legs:
+            cfg = saved_strats.get(leg['strategy'])
+            if not cfg:
+                ui.notify(f"Strategy {leg['strategy']} not found!", type='negative')
+                return
+            sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
+            
+        start_ga = slider_start_ga.value
+        years = slider_years.value
+        sessions = slider_freq.value
+        num_sims = slider_num_sims.value 
+        
+        # --- BATCH EXECUTION ---
+        def run_batch():
+            batch_results = []
+            for _ in range(num_sims):
+                traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
+                net_cost = total_in - final_ga
+                monthly_cost = net_cost / (years * 12)
+                
+                batch_results.append({
+                    'trajectory': traj, 
+                    'log': log, 
+                    'final': final_ga,
+                    'monthly_cost': monthly_cost
+                })
+            return batch_results
 
-    def log(msg):
-        with log_container:
-            ui.label(f"> {msg}")
-        log_container.scroll_to(percent=1.0)
+        results = await asyncio.to_thread(run_batch)
+        
+        # --- DATA PROCESSING ---
+        trajectories = np.array([r['trajectory'] for r in results])
+        months = list(range(trajectories.shape[1]))
+        
+        min_band = np.min(trajectories, axis=0)
+        max_band = np.max(trajectories, axis=0)
+        p25_band = np.percentile(trajectories, 25, axis=0)
+        p75_band = np.percentile(trajectories, 75, axis=0)
+        mean_line = np.mean(trajectories, axis=0)
+        median_line = np.median(trajectories, axis=0)
+        
+        survivors = len([r for r in results if r['final'] > 100])
+        survival_rate = (survivors / num_sims) * 100
+        
+        costs = [r['monthly_cost'] for r in results]
+        avg_cost = np.mean(costs)
+        med_cost = np.median(costs)
+        
+        progress.set_visibility(False)
+        with results_area:
+            
+            # 1. SCOREBOARD
+            with ui.row().classes('w-full justify-between mb-4'):
+                with ui.card().classes('bg-slate-800 p-2'):
+                    ui.label('SURVIVAL RATE').classes('text-xs text-slate-400')
+                    color = "text-green-400" if survival_rate > 90 else "text-red-400"
+                    ui.label(f"{survival_rate:.1f}%").classes(f'text-2xl font-black {color}')
+                
+                with ui.card().classes('bg-slate-800 p-2'):
+                    ui.label('MEDIAN MONTHLY COST').classes('text-xs text-slate-400')
+                    val_str = f"€{med_cost:,.0f}" if med_cost > 0 else f"+€{abs(med_cost):,.0f}"
+                    col_str = "text-red-400" if med_cost > 0 else "text-green-400"
+                    ui.label(val_str).classes(f'text-2xl font-black {col_str}')
+                
+                with ui.card().classes('bg-slate-800 p-2'):
+                    ui.label('AVG MONTHLY COST').classes('text-xs text-slate-400')
+                    val_str = f"€{avg_cost:,.0f}" if avg_cost > 0 else f"+€{abs(avg_cost):,.0f}"
+                    col_str = "text-red-400" if avg_cost > 0 else "text-green-400"
+                    ui.label(val_str).classes(f'text-2xl font-black {col_str}')
 
-    update_status_display()
+            # 2. MULTIVERSE CHART
+            ui.label('THE MULTIVERSE (Probabilities)').classes('text-sm font-bold text-slate-400 mt-2')
+            fig_multi = go.Figure()
+            fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Range'))
+            fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(74, 222, 128, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
+            fig_multi.add_trace(go.Scatter(x=months, y=median_line, mode='lines', name='Median', line=dict(color='yellow', width=2)))
+            
+            for leg in legs[:-1]:
+                fig_multi.add_hline(y=leg['target'], line_dash="dash", line_color="white", opacity=0.3)
+                
+            fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+            ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
+
+            # 3. SINGLE REALITY CHART
+            ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
+            
+            sim1_traj = results[0]['trajectory']
+            sim1_log = results[0]['log']
+            sim1_final = results[0]['final']
+            
+            chart_single_container.clear()
+            with chart_single_container:
+                res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
+                ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                
+                fig_single = go.Figure()
+                fig_single.add_trace(go.Scatter(y=sim1_traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+                
+                for leg in legs[:-1]:
+                    fig_single.add_hline(y=leg['target'], line_dash="dash", line_color="yellow", annotation_text=f"Switch")
+                    
+                fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
+            
+            ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
+
+            # 4. LOG
+            with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
+                for l in sim1_log:
+                    color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
+                    if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
+                    ui.label(f"M{l['month']} | {l['event']}: {l['details']}").classes(f'text-xs {color}')
+
+    # --- UI LAYOUT ---
+    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
+        ui.label('CAREER SIMULATOR (MULTI-STAGE)').classes('text-2xl font-light text-purple-300')
+        ui.label('Chain strategies. Analyze Probability (Multiverse) vs Reality (Single).').classes('text-sm text-slate-500 -mt-4')
+        
+        with ui.grid(columns=2).classes('w-full gap-6'):
+            # LEFT: CONTROLS
+            with ui.card().classes('w-full bg-slate-900 p-4'):
+                ui.label('1. BUILD SEQUENCE').classes('font-bold text-white mb-2')
+                
+                profile = load_profile()
+                saved = list(profile.get('saved_strategies', {}).keys())
+                
+                select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
+                ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
+                slider_target = ui.slider(min=5000, max=100000, step=1000, value=10000).props('color=yellow')
+                ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
+                
+                ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
+                
+                ui.separator().classes('bg-slate-700 my-4')
+                
+                ui.label('2. GLOBAL SETTINGS').classes('font-bold text-white mb-2')
+                slider_start_ga = ui.slider(min=1000, max=50000, value=2000).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'Start: €{v}')
+                slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
+                slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
+                
+                ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
+                slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
+                ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
+                
+                ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
+
+            # RIGHT: SEQUENCE VIEW
+            with ui.column().classes('w-full'):
+                ui.label('CAREER PATH').classes('font-bold text-white mb-2')
+                legs_container = ui.column().classes('w-full')
+                progress = ui.linear_progress().props('indeterminate color=purple').classes('w-full'); progress.set_visibility(False)
+                results_area = ui.column().classes('w-full')
+                chart_single_container = ui.column().classes('w-full')
+
+    refresh_leg_ui()
