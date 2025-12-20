@@ -205,13 +205,16 @@ class RouletteWorker:
             'zero_uses': total_zero_uses, 'tiers_uses': total_tiers_uses
         }
 
-# --- STATS CALCULATOR ---
+# --- STATS CALCULATOR (FIXED) ---
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
     trajectories = np.array([r['trajectory'] for r in results])
     months = list(range(trajectories.shape[1]))
     
     total_sims = len(results)
+    
+    # Calculate Total Sessions played in a career to correct the "Uses Per Session" metric
+    total_sessions_per_career = config['years'] * config['freq']
     
     stats = {
         'months': months,
@@ -229,9 +232,10 @@ def calculate_stats(results, config, start_ga, total_months):
         'total_input': start_ga + np.mean([r['contrib'] for r in results]),
         'survivor_count': len([r for r in results if r['final_ga'] >= 100]),
         
+        # Spice Stats (FIXED: Divided by Total Sessions)
         'avg_spice_sessions': np.mean([r['spice_sessions'] for r in results]),
-        'avg_zero_uses': np.mean([r['zero_uses'] for r in results]),
-        'avg_tiers_uses': np.mean([r['tiers_uses'] for r in results])
+        'avg_zero_uses': np.mean([r['zero_uses'] for r in results]) / total_sessions_per_career,
+        'avg_tiers_uses': np.mean([r['tiers_uses'] for r in results]) / total_sessions_per_career
     }
     return stats
 
@@ -395,7 +399,7 @@ def show_roulette_sim():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
-                # SPICE
+                # SPICE - FIXED TO 1 SPIN COOLDOWN
                 spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
                 spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
                 spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
