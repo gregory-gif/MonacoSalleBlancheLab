@@ -533,6 +533,14 @@ def show_roulette_sim():
                             ui.label(f"{grade}").classes(f'text-6xl font-black {g_col} leading-none')
                             ui.label(f"{total_score:.1f}% Score").classes(f'text-sm font-bold {g_col}')
                         with ui.column().classes('items-center'):
+                            ui.label('REAL MONTHLY COST').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            if real_monthly_cost > 0:
+                                ui.label(f"€{real_monthly_cost:,.0f}").classes('text-4xl font-black text-red-400 leading-none')
+                                ui.label("Net Cost").classes('text-xs font-bold text-red-900 bg-red-400 px-1 rounded')
+                            else:
+                                ui.label(f"+€{abs(real_monthly_cost):,.0f}").classes('text-4xl font-black text-green-400 leading-none')
+                                ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
+                        with ui.column().classes('items-center'):
                             ui.label('SPICE FREQUENCY').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             ui.label(f"{stats['avg_spice_sessions']:.1f}").classes('text-3xl font-bold text-pink-400')
                             ui.label("Avg Sess w/ Spice").classes('text-xs text-slate-500')
@@ -602,7 +610,6 @@ def show_roulette_sim():
             lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
             lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
             
-            y1_log = all_results[0].get('y1_log', [])
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
