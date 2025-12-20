@@ -205,6 +205,7 @@ class RouletteWorker:
             'zero_uses': total_zero_uses, 'tiers_uses': total_tiers_uses
         }
 
+# --- STATS CALCULATOR (OFFLOADED) ---
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
     trajectories = np.array([r['trajectory'] for r in results])
@@ -238,9 +239,19 @@ def calculate_stats(results, config, start_ga, total_months):
 def show_roulette_sim():
     running = False 
     
-    # ... (Keep existing load/save/delete/update functions) ...
-    # Placeholder for standard functions to save space in this view, assume they are identical to previous version
-    
+    def load_saved_strategies():
+        try:
+            profile = load_profile()
+            return profile.get('saved_strategies', {})
+        except: return {}
+
+    def update_strategy_list():
+        try:
+            saved = load_saved_strategies()
+            select_saved.options = list(saved.keys())
+            select_saved.update()
+        except: pass
+
     def save_current_strategy():
         try:
             name = input_name.value
@@ -249,7 +260,6 @@ def show_roulette_sim():
             if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
             
             config = {
-                # ... (Existing Fields) ...
                 'sim_num': slider_num_sims.value, 'sim_years': slider_years.value, 'sim_freq': slider_frequency.value,
                 'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
                 'eco_hol': switch_holiday.value, 'eco_hol_ceil': slider_holiday_ceil.value, 'eco_insolvency': slider_insolvency.value,
@@ -283,9 +293,40 @@ def show_roulette_sim():
             config = saved.get(name)
             if not config: return
             
-            # ... (Existing Fields Load) ...
             slider_num_sims.value = config.get('sim_num', 20)
-            # ... (Rest of existing loads) ...
+            slider_years.value = config.get('sim_years', 10)
+            slider_frequency.value = config.get('sim_freq', 10)
+            slider_contrib_win.value = config.get('eco_win', 300)
+            slider_contrib_loss.value = config.get('eco_loss', 300)
+            switch_luxury_tax.value = config.get('eco_tax', False)
+            slider_tax_thresh.value = config.get('eco_tax_thresh', 12500)
+            slider_tax_rate.value = config.get('eco_tax_rate', 25)
+            switch_holiday.value = config.get('eco_hol', False)
+            slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
+            slider_insolvency.value = config.get('eco_insolvency', 1000) 
+            slider_safety.value = config.get('tac_safety', 25)
+            slider_iron_gate.value = config.get('tac_iron', 3)
+            select_press.value = config.get('tac_press', 1)
+            slider_press_depth.value = config.get('tac_depth', 3)
+            slider_shoes.value = config.get('tac_shoes', 3)
+            
+            bet_val = config.get('tac_bet', 'Red')
+            if bet_val not in BET_MAP: bet_val = 'Red'
+            select_bet_strat.value = bet_val
+            
+            bet_2_val = config.get('tac_bet_2', None)
+            select_bet_strat_2.value = bet_2_val
+            
+            switch_penalty.value = config.get('tac_penalty', True)
+            select_engine_mode.value = config.get('tac_mode', 'Standard') 
+            slider_stop_loss.value = config.get('risk_stop', 10)
+            slider_profit.value = config.get('risk_prof', 10)
+            switch_ratchet.value = config.get('risk_ratch', False)
+            select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
+            select_status.value = config.get('gold_stat', 'Gold')
+            slider_earn_rate.value = config.get('gold_earn', 10)
+            slider_start_ga.value = config.get('start_ga', 2000)
+            slider_base_bet.value = config.get('tac_base_bet', 5.0)
             
             # SPICE LOADS
             switch_spice_zero.value = config.get('spice_zero_en', False)
@@ -298,7 +339,36 @@ def show_roulette_sim():
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
 
-    # ... (Keep delete_selected_strategy, update_ladder_preview) ...
+    def delete_selected_strategy():
+        try:
+            name = select_saved.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' in profile and name in profile['saved_strategies']:
+                del profile['saved_strategies'][name]
+                save_profile(profile)
+                ui.notify(f'Deleted: {name}', type='negative')
+                select_saved.value = None
+                update_strategy_list()
+        except: pass
+
+    def update_ladder_preview():
+        try:
+            factor = slider_safety.value
+            mode = select_engine_mode.value
+            base = slider_base_bet.value 
+            t_map = generate_tier_map(factor, mode=mode, game_type='Roulette', base_bet=base)
+            
+            rows = []
+            for level, t in t_map.items():
+                if t.min_ga == float('inf'): continue
+                risk_pct = 0 if t.min_ga == 0 else (t.base_unit / t.min_ga) * 100
+                start_str = f"€{t.min_ga:,.0f}"
+                rows.append({'tier': f"Tier {level}", 'bet': f"€{t.base_unit} (Press +{t.press_unit})", 'start': start_str, 'risk': f"{risk_pct:.1f}%"})
+            ladder_grid.options['rowData'] = rows
+            ladder_grid.update()
+        except Exception as e:
+            pass 
 
     async def run_sim():
         nonlocal running
@@ -367,6 +437,8 @@ def show_roulette_sim():
             stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
             render_analysis_ui(stats, config, start_ga, overrides, all_results) 
             label_stats.set_text("Simulation Complete")
+            
+            await refresh_single_universe()
 
         except Exception as e:
             print(traceback.format_exc())
@@ -379,14 +451,20 @@ def show_roulette_sim():
         total_output = stats['avg_final_ga'] + stats['avg_tax']
         grand_total_wealth = total_output 
         
-        # ... (Calc standard metrics) ...
         months = stats['months']
         gold_prob = (len(stats['gold_hits']) / config['num_sims']) * 100
         net_life_result = total_output - stats['total_input']
-        real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
+        net_cost = stats['total_input'] - total_output
+        real_monthly_cost = net_cost / (config['years']*12)
+        
+        insolvency_pct = (stats['avg_insolvent'] / (config['years']*12)) * 100
+        active_pct = 100 - insolvency_pct
+        y1_survival_rate = 100 - ((stats['y1_failures'] / config['num_sims']) * 100)
         score_survival = (stats['survivor_count'] / config['num_sims']) * 100
-        # ... (Grade Calc) ...
-        active_pct = 100 - ((stats['avg_insolvent'] / (config['years']*12)) * 100)
+        
+        if real_monthly_cost <= 0: score_cost = 100
+        else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
+        
         total_score = (score_survival * 0.70) + (active_pct * 0.30)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
         elif total_score >= 80: grade, g_col = "B", "text-blue-400"
@@ -427,17 +505,37 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
-            press_name = {0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Titan', 4: "Capped D'Alembert", 5: "La Caroline"}.get(overrides.press_trigger_wins, 'Unknown')
+            press_map = {
+                0: 'Flat', 
+                1: 'Press 1-Win', 
+                2: 'Press 2-Wins', 
+                3: 'Titan Progression', 
+                4: "Capped D'Alembert", 
+                5: "La Caroline"
+            }
+            press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
 
             lines = ["=== ROULETTE CONFIGURATION ==="]
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
             lines.append(f"Betting: {overrides.bet_strategy} + {overrides.bet_strategy_2}")
-            lines.append(f"Spice Zéro: {overrides.spice_zero_enabled} (Trig {overrides.spice_zero_trigger}u, Max {overrides.spice_zero_max})")
-            lines.append(f"Spice Tiers: {overrides.spice_tiers_enabled} (Trig {overrides.spice_tiers_trigger}u, Max {overrides.spice_tiers_max})")
+            lines.append(f"Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
+            lines.append(f"Press Logic: {press_name} | Safety: {config['safety']}x | Iron Gate: {overrides.iron_gate_limit}")
+            lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+            lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
+            lines.append(f"Gold Probability: {gold_prob:.1f}%")
             
             lines.append("\n=== PERFORMANCE RESULTS ===")
+            lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
+            lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
+            lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+            lines.append(f"Active Play Time: {active_pct:.1f}%")
+            lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
+            
+            lines.append(f"\n=== SPICE BET STATS ===")
+            lines.append(f"Spice Zéro: {overrides.spice_zero_enabled} (Trig {overrides.spice_zero_trigger}u, Max {overrides.spice_zero_max})")
+            lines.append(f"Spice Tiers: {overrides.spice_tiers_enabled} (Trig {overrides.spice_tiers_trigger}u, Max {overrides.spice_tiers_max})")
             lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
             lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
             
@@ -454,7 +552,6 @@ def show_roulette_sim():
         ui.label('ROULETTE LAB (MONACO RULES)').classes('text-2xl font-light text-red-400')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
-            # ... (Strategy Library) ...
             with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
                 with ui.column().classes('w-full gap-4'):
                     with ui.row().classes('w-full items-center gap-4'):
@@ -467,8 +564,7 @@ def show_roulette_sim():
                     update_strategy_list()
 
             ui.separator().classes('bg-slate-700')
-            
-            # ... (Sim Sliders) ...
+
             with ui.row().classes('w-full gap-4 items-start'):
                 with ui.column().classes('flex-grow'):
                     ui.label('SIMULATION').classes('font-bold text-white mb-2')
@@ -520,7 +616,6 @@ def show_roulette_sim():
                     with ui.row().classes('w-full justify-between'): ui.label('Safety Buffer').classes('text-xs text-orange-400'); lbl_safe = ui.label()
                     slider_safety = ui.slider(min=10, max=60, value=25, on_change=update_ladder_preview).props('color=orange'); lbl_safe.bind_text_from(slider_safety, 'value', lambda v: f'{v}x')
                     
-                    # ... (Ecosystem sliders) ...
                     ui.label('ECOSYSTEM').classes('font-bold text-green-400 mt-4')
                     slider_contrib_win = ui.slider(min=0, max=1000, value=300).props('color=green'); ui.label().bind_text_from(slider_contrib_win, 'value', lambda v: f'Win +€{v}')
                     slider_contrib_loss = ui.slider(min=0, max=1000, value=300).props('color=orange'); ui.label().bind_text_from(slider_contrib_loss, 'value', lambda v: f'Loss +€{v}')
@@ -572,7 +667,3 @@ def show_roulette_sim():
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
-        
-        # Manually triggering a fake load if needed (or keep empty)
-        # load_saved_strategies()
-        # update_strategy_list()
