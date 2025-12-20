@@ -128,6 +128,7 @@ class RouletteWorker:
         tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Roulette', base_bet=base_bet_val)
         trajectory = []
         current_ga = start_ga
+        running_play_pnl = 0  # <--- RESTORED: Tracks game-only PnL for "Game Bal"
         
         initial_tier = get_tier_for_ga(current_ga, tier_map, 1, strategy_mode, game_type='Roulette')
         active_level = initial_tier.level
@@ -180,6 +181,7 @@ class RouletteWorker:
                     )
                     active_level = used_level 
                     current_ga += pnl
+                    running_play_pnl += pnl # <--- RESTORED
                     current_year_points += vol * (earn_rate / 100)
                     last_session_won = (pnl > 0)
                     
@@ -188,10 +190,10 @@ class RouletteWorker:
                     if s_zero > 0 or s_tiers > 0: sessions_with_spices += 1
                     
                     if track_y1_details and m < 12:
-                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': 0, 'hands': spins})
+                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': spins})
             else:
                  if track_y1_details and m < 12:
-                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': 0, 'hands': 0, 'note': 'Insolvent'})
+                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
 
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
@@ -205,15 +207,13 @@ class RouletteWorker:
             'zero_uses': total_zero_uses, 'tiers_uses': total_tiers_uses
         }
 
-# --- STATS CALCULATOR (FIXED) ---
+# --- STATS CALCULATOR ---
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
     trajectories = np.array([r['trajectory'] for r in results])
     months = list(range(trajectories.shape[1]))
     
     total_sims = len(results)
-    
-    # Calculate Total Sessions played in a career to correct the "Uses Per Session" metric
     total_sessions_per_career = config['years'] * config['freq']
     
     stats = {
@@ -232,7 +232,7 @@ def calculate_stats(results, config, start_ga, total_months):
         'total_input': start_ga + np.mean([r['contrib'] for r in results]),
         'survivor_count': len([r for r in results if r['final_ga'] >= 100]),
         
-        # Spice Stats (FIXED: Divided by Total Sessions)
+        # Spice Stats (Divided by Total Sessions for "Per Session" metric)
         'avg_spice_sessions': np.mean([r['spice_sessions'] for r in results]),
         'avg_zero_uses': np.mean([r['zero_uses'] for r in results]) / total_sessions_per_career,
         'avg_tiers_uses': np.mean([r['tiers_uses'] for r in results]) / total_sessions_per_career
