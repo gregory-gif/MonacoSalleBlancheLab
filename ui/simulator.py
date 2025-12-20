@@ -5,7 +5,7 @@ import asyncio
 import traceback
 import numpy as np
 
-# IMPORT THE NEW RULES WE JUST CREATED
+# IMPORT THE NEW RULES
 from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist
 from engine.strategy_rules import StrategyOverrides, BetStrategy
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
@@ -286,6 +286,8 @@ def show_simulator():
             
             for i in range(0, config['num_sims'], batch_size):
                 count = min(batch_size, config['num_sims'] - i)
+                
+                # --- ASYNC BATCH EXECUTION ---
                 def run_batch():
                     batch_data = []
                     for k in range(count):
@@ -302,6 +304,7 @@ def show_simulator():
 
                 batch_res = await asyncio.to_thread(run_batch)
                 all_results.extend(batch_res)
+                
                 progress.set_value(len(all_results) / config['num_sims'])
                 label_stats.set_text(f"Simulating Universe {len(all_results)}/{config['num_sims']}")
                 await asyncio.sleep(0.01)
@@ -322,6 +325,9 @@ def show_simulator():
         
         months = stats['months']
         total_output = stats['avg_final_ga'] + stats['avg_tax']
+        # DEFINE THE VARIABLE HERE TO FIX THE ERROR
+        grand_total_wealth = total_output 
+        
         real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
         score_survival = (stats['survivor_count'] / config['num_sims']) * 100
         active_pct = 100 - ((stats['avg_insolvent'] / (config['years']*12)) * 100)
@@ -352,7 +358,7 @@ def show_simulator():
                                 ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
                         with ui.column().classes('items-center'):
                             ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
-                            ui.label(f"€{total_output:,.0f}").classes('text-4xl font-black text-white leading-none')
+                            ui.label(f"€{grand_total_wealth:,.0f}").classes('text-4xl font-black text-white leading-none')
                             if stats['avg_tax'] > 0: ui.label(f"(GA €{stats['avg_final_ga']:,.0f} + Tax €{stats['avg_tax']:,.0f})").classes('text-xs font-bold text-yellow-400')
 
         with chart_container:
@@ -382,23 +388,12 @@ def show_simulator():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
+    # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
-            with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
-                with ui.column().classes('w-full gap-4'):
-                    with ui.row().classes('w-full items-center gap-4'):
-                        input_name = ui.input('Save Name').props('dark').classes('flex-grow')
-                        ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
-                    with ui.row().classes('w-full items-center gap-4'):
-                        select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
-                        ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
-                        ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
-                    update_strategy_list()
-
-            ui.separator().classes('bg-slate-700')
-
+            # ... (Sim Sliders) ...
             with ui.row().classes('w-full gap-4 items-start'):
                 with ui.column().classes('flex-grow'):
                     ui.label('SIMULATION').classes('font-bold text-white mb-2')
@@ -415,6 +410,7 @@ def show_simulator():
 
             ui.separator().classes('bg-slate-700')
 
+            # CONTROLS
             with ui.grid(columns=2).classes('w-full gap-8'):
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
