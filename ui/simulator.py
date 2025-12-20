@@ -5,12 +5,12 @@ import asyncio
 import traceback
 import numpy as np
 
-from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist, BetStrategy
+# IMPORT THE NEW RULES WE JUST CREATED
+from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist
+from engine.strategy_rules import StrategyOverrides, BetStrategy
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
-from engine.strategy_rules import StrategyOverrides
 
-# SBM LOYALTY TIERS
 SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
 class BaccaratWorker:
@@ -45,12 +45,9 @@ class BaccaratWorker:
             amt = decision['bet_amount']
             volume += amt
             
-            # Resolve Hand ( approx 50/50 for sim speed, Banker 0.95 win)
+            # Simulation Physics
             is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            win_chance = 0.5068 if is_banker else 0.4932 
-            
-            # Simple simulation of result
-            won = (random.random() < 0.5) # Simplified for speed vs exact physics
+            won = (random.random() < 0.5) 
             
             pnl = 0
             if won:
@@ -60,7 +57,6 @@ class BaccaratWorker:
                 
             BaccaratStrategist.update_state_after_hand(state, won, pnl)
             
-            # Check shoe end (approx 70 hands)
             if state.hands_played_in_shoe >= 70:
                 state.current_shoe += 1
                 state.hands_played_in_shoe = 0
@@ -89,8 +85,7 @@ class BaccaratWorker:
         last_session_won = False
 
         for m in range(total_months):
-            if m > 0 and m % 12 == 0:
-                current_year_points = 0
+            if m > 0 and m % 12 == 0: current_year_points = 0
 
             if use_tax and current_ga > overrides.tax_threshold:
                 surplus = current_ga - overrides.tax_threshold
@@ -132,7 +127,6 @@ class BaccaratWorker:
             
         return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': gold_hit_year}
 
-# --- OFFLOADED STATS CALCULATOR ---
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
     trajectories = np.array([r['trajectory'] for r in results])
@@ -156,10 +150,9 @@ def calculate_stats(results, config, start_ga, total_months):
     }
     return stats
 
-def show_baccarat_sim():
+def show_simulator():
     running = False 
     
-    # ... (Load/Save/Delete Helpers - Compacted for Brevity but functional) ...
     def load_saved_strategies():
         try: return load_profile().get('saved_strategies', {})
         except: return {}
@@ -167,19 +160,97 @@ def show_baccarat_sim():
         try: select_saved.options = list(load_saved_strategies().keys()); select_saved.update()
         except: pass
     
-    # ... (Standard Save/Delete/Load Logic matches Roulette exactly) ...
-    # I am keeping the logic flow identical to Roulette for consistency
     def save_current_strategy():
-        # (Standard saving logic)
-        pass 
-    def load_selected_strategy():
-        # (Standard loading logic)
-        pass
-    def delete_selected_strategy():
-        # (Standard delete logic)
-        pass
+        try:
+            name = input_name.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
+            config = {
+                'sim_num': slider_num_sims.value, 'years': slider_years.value, 'freq': slider_frequency.value,
+                'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
+                'eco_hol': switch_holiday.value, 'eco_hol_ceil': slider_holiday_ceil.value, 'eco_insolvency': slider_insolvency.value,
+                'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
+                'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
+                'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
+                'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
+                'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
+                'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
+                'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
+                'tac_base_bet': slider_base_bet.value
+            }
+            profile['saved_strategies'][name] = config
+            save_profile(profile)
+            ui.notify(f'Saved: {name}', type='positive')
+            update_strategy_list()
+        except Exception as e: ui.notify(str(e), type='negative')
 
-    # --- THE RUNNER ---
+    def load_selected_strategy():
+        try:
+            name = select_saved.value
+            if not name: return
+            saved = load_saved_strategies()
+            config = saved.get(name)
+            if not config: return
+            slider_num_sims.value = config.get('sim_num', 20)
+            slider_years.value = config.get('years', 10)
+            slider_frequency.value = config.get('freq', 10)
+            slider_contrib_win.value = config.get('eco_win', 300)
+            slider_contrib_loss.value = config.get('eco_loss', 300)
+            switch_luxury_tax.value = config.get('eco_tax', False)
+            slider_tax_thresh.value = config.get('eco_tax_thresh', 12500)
+            slider_tax_rate.value = config.get('eco_tax_rate', 25)
+            switch_holiday.value = config.get('eco_hol', False)
+            slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
+            slider_insolvency.value = config.get('eco_insolvency', 1000) 
+            slider_safety.value = config.get('tac_safety', 25)
+            slider_iron_gate.value = config.get('tac_iron', 3)
+            select_press.value = config.get('tac_press', 1)
+            slider_press_depth.value = config.get('tac_depth', 3)
+            slider_shoes.value = config.get('tac_shoes', 3)
+            select_bet_strat.value = config.get('tac_bet', 'BANKER')
+            switch_penalty.value = config.get('tac_penalty', True)
+            select_engine_mode.value = config.get('tac_mode', 'Standard') 
+            slider_stop_loss.value = config.get('risk_stop', 10)
+            slider_profit.value = config.get('risk_prof', 10)
+            switch_ratchet.value = config.get('risk_ratch', False)
+            select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
+            select_status.value = config.get('gold_stat', 'Gold')
+            slider_earn_rate.value = config.get('gold_earn', 10)
+            slider_start_ga.value = config.get('start_ga', 2000)
+            slider_base_bet.value = config.get('tac_base_bet', 5.0)
+            ui.notify(f'Loaded: {name}', type='info')
+        except: pass
+
+    def delete_selected_strategy():
+        try:
+            name = select_saved.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' in profile and name in profile['saved_strategies']:
+                del profile['saved_strategies'][name]
+                save_profile(profile)
+                ui.notify(f'Deleted: {name}', type='negative')
+                select_saved.value = None
+                update_strategy_list()
+        except: pass
+
+    def update_ladder_preview():
+        try:
+            factor = slider_safety.value
+            mode = select_engine_mode.value
+            base = slider_base_bet.value 
+            t_map = generate_tier_map(factor, mode=mode, game_type='Baccarat', base_bet=base)
+            rows = []
+            for level, t in t_map.items():
+                if t.min_ga == float('inf'): continue
+                risk_pct = 0 if t.min_ga == 0 else (t.base_unit / t.min_ga) * 100
+                start_str = f"€{t.min_ga:,.0f}"
+                rows.append({'tier': f"Tier {level}", 'bet': f"€{t.base_unit} (Press +{t.press_unit})", 'start': start_str, 'risk': f"{risk_pct:.1f}%"})
+            ladder_grid.options['rowData'] = rows
+            ladder_grid.update()
+        except Exception as e: pass 
+
     async def run_sim():
         nonlocal running
         if running: return
@@ -187,7 +258,6 @@ def show_baccarat_sim():
             running = True; btn_sim.disable(); progress.set_value(0); progress.set_visibility(True)
             label_stats.set_text("Dealing Cards (Multiverse)...")
             
-            # CONFIG
             config = {
                 'num_sims': int(slider_num_sims.value), 'years': int(slider_years.value), 'freq': int(slider_frequency.value),
                 'contrib_win': int(slider_contrib_win.value), 'contrib_loss': int(slider_contrib_loss.value),
@@ -216,8 +286,6 @@ def show_baccarat_sim():
             
             for i in range(0, config['num_sims'], batch_size):
                 count = min(batch_size, config['num_sims'] - i)
-                
-                # --- ASYNC BATCH EXECUTION ---
                 def run_batch():
                     batch_data = []
                     for k in range(count):
@@ -232,19 +300,14 @@ def show_baccarat_sim():
                         batch_data.append(res)
                     return batch_data
 
-                # AWAIT THE THREAD
                 batch_res = await asyncio.to_thread(run_batch)
                 all_results.extend(batch_res)
-                
                 progress.set_value(len(all_results) / config['num_sims'])
                 label_stats.set_text(f"Simulating Universe {len(all_results)}/{config['num_sims']}")
-                # KEEP ALIVE
                 await asyncio.sleep(0.01)
 
             label_stats.set_text("Analyzing Data...")
-            # AWAIT THE STATS CALCULATION
             stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
-            
             render_analysis(stats, config, start_ga, overrides)
             label_stats.set_text("Simulation Complete")
 
@@ -257,11 +320,8 @@ def show_baccarat_sim():
     def render_analysis(stats, config, start_ga, overrides):
         if not stats: return
         
-        # ... (Metrics Calculation) ...
         months = stats['months']
-        gold_prob = (len(stats['gold_hits']) / config['num_sims']) * 100
         total_output = stats['avg_final_ga'] + stats['avg_tax']
-        net_life_result = total_output - stats['total_input']
         real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
         score_survival = (stats['survivor_count'] / config['num_sims']) * 100
         active_pct = 100 - ((stats['avg_insolvent'] / (config['years']*12)) * 100)
@@ -310,27 +370,35 @@ def show_baccarat_sim():
 
         with report_container:
             report_container.clear()
-            # ... (Simple Report) ...
             lines = ["=== BACCARAT CONFIGURATION ==="]
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
             lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
             lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
             lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
-            
             lines.append("\n=== PERFORMANCE RESULTS ===")
             lines.append(f"Total Survival Rate: {score_survival:.1f}%")
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
-            
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
-    # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
-            # ... (Sim Sliders) ...
+            with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
+                with ui.column().classes('w-full gap-4'):
+                    with ui.row().classes('w-full items-center gap-4'):
+                        input_name = ui.input('Save Name').props('dark').classes('flex-grow')
+                        ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
+                    with ui.row().classes('w-full items-center gap-4'):
+                        select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
+                        ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
+                        ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
+                    update_strategy_list()
+
+            ui.separator().classes('bg-slate-700')
+
             with ui.row().classes('w-full gap-4 items-start'):
                 with ui.column().classes('flex-grow'):
                     ui.label('SIMULATION').classes('font-bold text-white mb-2')
@@ -347,7 +415,6 @@ def show_baccarat_sim():
 
             ui.separator().classes('bg-slate-700')
 
-            # CONTROLS
             with ui.grid(columns=2).classes('w-full gap-8'):
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
