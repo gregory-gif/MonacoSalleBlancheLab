@@ -554,6 +554,18 @@ def show_roulette_sim():
             fig.update_layout(title='Monte Carlo Confidence Bands (Roulette)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
             ui.plotly(fig).classes('w-full h-96')
 
+        with flight_recorder_container:
+            flight_recorder_container.clear()
+            y1_log = all_results[0].get('y1_log', [])
+            # OUR LOG
+            with ui.expansion('OUR LOG (Year 1 - Sim #1)', icon='history_edu', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+                if y1_log:
+                    table_rows = []
+                    for entry in y1_log:
+                        res_val = entry.get('result', 0)
+                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
+                    ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
+
         with report_container:
             report_container.clear()
             press_map = {
@@ -590,6 +602,7 @@ def show_roulette_sim():
             lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
             lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
             
+            y1_log = all_results[0].get('y1_log', [])
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
