@@ -110,7 +110,7 @@ def render_page():
         
         # --- HEADER ---
         with ui.column().classes('w-full'):
-            ui.label("The Captain's Log").classes('text-4xl font-serif font-bold text-slate-100')
+            ui.label("Caroline & Gregory Logbook").classes('text-4xl font-serif font-bold text-slate-100')
             ui.label("Post-Session Ledger & Tracker").classes('text-slate-400')
 
         # --- KPI CARDS ---
