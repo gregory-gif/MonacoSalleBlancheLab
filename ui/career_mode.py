@@ -6,9 +6,11 @@ import traceback
 from copy import deepcopy
 
 # --- CRITICAL INTEGRATION: IMPORT BOTH WORKERS ---
-from ui.simulator import SimulationWorker
+# FIX: Use BaccaratWorker instead of SimulationWorker
+from ui.simulator import BaccaratWorker 
 from ui.roulette_sim import RouletteWorker
-from engine.strategy_rules import SessionState, BaccaratStrategist, PlayMode, StrategyOverrides, BetStrategy
+from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist # Explicit import
+from engine.strategy_rules import StrategyOverrides, BetStrategy, PlayMode
 from engine.tier_params import get_tier_for_ga, generate_tier_map
 from utils.persistence import load_profile
 
@@ -27,7 +29,7 @@ class CareerManager:
         active_target = sequence_config[0]['target_ga']
         
         # Extract Params & Detect Game Type
-        overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type = CareerManager._extract_params(active_config)
+        overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
         
         trajectory = []
         log = []
@@ -55,7 +57,7 @@ class CareerManager:
                     active_target = new_leg['target_ga']
                     
                     # Refresh Params for new Leg
-                    overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type = CareerManager._extract_params(active_config)
+                    overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
                     
                     # Reset Tier Level based on new map
                     temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
@@ -100,13 +102,13 @@ class CareerManager:
             for _ in range(sessions_this_month):
                 if game_type == 'Roulette':
                     # --- ROULETTE ENGINE ---
-                    pnl, vol, used_lvl, hands = RouletteWorker.run_session(
-                        current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode
+                    pnl, vol, used_lvl, hands, z, t = RouletteWorker.run_session(
+                        current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE ---
-                    pnl, vol, used_lvl, hands = SimulationWorker.run_session(
-                        current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode
+                    # --- BACCARAT ENGINE (FIXED CALL) ---
+                    pnl, vol, used_lvl, hands = BaccaratWorker.run_session(
+                        current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 
                 current_ga += pnl
@@ -128,20 +130,20 @@ class CareerManager:
     def _extract_params(config):
         mode = config.get('tac_mode', 'Standard')
         safety = config.get('tac_safety', 25)
+        base_bet = config.get('tac_base_bet', 10.0) # Added base bet extraction
         
         # 1. Detect Game Type
         bet_val = config.get('tac_bet', 'Banker')
         game_type = 'Roulette' if bet_val in ROULETTE_BETS else 'Baccarat'
         
         # 2. Generate appropriate Tier Map
-        tier_map = generate_tier_map(safety, mode=mode, game_type=game_type)
+        tier_map = generate_tier_map(safety, mode=mode, game_type=game_type, base_bet=base_bet)
         
         # 3. Handle Bet Strategy Object
         if game_type == 'Baccarat':
-            bet_strat_obj = BetStrategy.BANKER if bet_val == 'Banker' else BetStrategy.PLAYER
+            bet_strat_obj = BetStrategy.BANKER if bet_val == 'BANKER' else BetStrategy.PLAYER
         else:
             # For Roulette, we pass the string directly (e.g., 'Red')
-            # The RouletteWorker knows how to handle the string.
             bet_strat_obj = bet_val 
 
         overrides = StrategyOverrides(
@@ -154,12 +156,22 @@ class CareerManager:
             ratchet_mode=config.get('risk_ratch_mode', 'Standard'),
             shoes_per_session=config.get('tac_shoes', 3),
             bet_strategy=bet_strat_obj,
-            penalty_box_enabled=config.get('tac_penalty', True)
+            penalty_box_enabled=config.get('tac_penalty', True),
+            
+            # Spice Configs (Safe Defaults)
+            spice_zero_enabled=config.get('spice_zero_en', False),
+            spice_zero_trigger=config.get('spice_zero_trig', 15),
+            spice_zero_max=config.get('spice_zero_max', 100),
+            spice_zero_cooldown=config.get('spice_zero_cool', 10),
+            spice_tiers_enabled=config.get('spice_tiers_en', False),
+            spice_tiers_trigger=config.get('spice_tiers_trig', 25),
+            spice_tiers_max=config.get('spice_tiers_max', 100),
+            spice_tiers_cooldown=config.get('spice_tiers_cool', 10)
         )
         use_ratchet = config.get('risk_ratch', False)
         penalty_mode = config.get('tac_penalty', True)
         
-        return overrides, tier_map, safety, mode, use_ratchet, penalty_mode, game_type
+        return overrides, tier_map, safety, mode, use_ratchet, penalty_mode, game_type, base_bet
 
 def show_career_mode():
     
@@ -221,6 +233,7 @@ def show_career_mode():
 
         except Exception as e:
             ui.notify(str(e), type='negative')
+            print(traceback.format_exc())
 
     async def run_simulation():
         if not legs:
