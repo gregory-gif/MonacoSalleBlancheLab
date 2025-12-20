@@ -285,7 +285,8 @@ def show_simulator():
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                spice_zero_enabled=False, spice_tiers_enabled=False
             )
             
             res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
@@ -336,7 +337,8 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                spice_zero_enabled=False, spice_tiers_enabled=False
             )
 
             start_ga = config['start_ga']
@@ -424,6 +426,7 @@ def show_simulator():
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([stats['p75_band'], stats['p25_band'][::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
             fig.add_trace(go.Scatter(x=months, y=stats['mean_line'], mode='lines', name='Average', line=dict(color='white', width=2)))
             fig.add_trace(go.Scatter(x=months, y=stats['median_line'], mode='lines', name='Median', line=dict(color='yellow', width=2, dash='dot')))
+            
             fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red", annotation_text="Insolvency")
             if config['use_holiday']: fig.add_hline(y=config['hol_ceil'], line_dash="dash", line_color="yellow", annotation_text="Holiday")
             fig.update_layout(title='Monte Carlo Confidence Bands (Baccarat)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
@@ -452,11 +455,13 @@ def show_simulator():
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
+            
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
                 for e in y1_log:
                     lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
@@ -532,6 +537,11 @@ def show_simulator():
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        
+        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
+        chart_single_container = ui.column().classes('w-full mt-2')
+        
+        flight_recorder_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
