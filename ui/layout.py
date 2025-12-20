@@ -4,26 +4,18 @@ from typing import Dict, Callable
 def create_layout(nav_funcs: Dict[str, Callable]) -> ui.column:
     """
     Builds the main cockpit frame: Header, Sidebar, and Content Container.
-    
-    Args:
-        nav_funcs: A dictionary mapping keys ('dashboard', 'cockpit', 'simulator', 'logs')
-                   to their respective load functions in main.py.
-                   
-    Returns:
-        The main content ui.column() where pages should be rendered.
     """
     # ---------------------------------------------------------
     # 1. HEADER (The Status Bar)
     # ---------------------------------------------------------
     with ui.header().classes('bg-slate-900 text-white shadow-lg items-center'):
         # Menu Button (toggles sidebar)
-        # Note: We use a deferred lambda to access left_drawer which is defined below
         ui.button(on_click=lambda: left_drawer.toggle(), icon='menu').props('flat color=white')
         
         # Title
         ui.label('SALLE BLANCHE LAB').classes('text-xl font-bold tracking-widest ml-2')
         
-        ui.space() # Pushes next items to the right
+        ui.space() 
         
         # Status Badge
         with ui.row().classes('items-center gap-2'):
@@ -43,11 +35,13 @@ def create_layout(nav_funcs: Dict[str, Callable]) -> ui.column:
                 ui.button('DASHBOARD', icon='analytics', on_click=nav_funcs['dashboard']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
                 ui.button('LIVE COCKPIT', icon='casino', on_click=nav_funcs['cockpit']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
                 ui.button('SIMULATOR', icon='science', on_click=nav_funcs['simulator']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
-                ui.button('SESSION LOG', icon='history', on_click=nav_funcs['logs']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+                
+                # UPDATED: Changed Name and Icon
+                ui.button('OUR LOG', icon='history_edu', on_click=nav_funcs['logs']).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
             
             ui.separator().classes('bg-slate-700 my-2')
             
-            # B. Memory Cheat Codes (Permanent Display)
+            # B. Memory Cheat Codes
             ui.label('DOCTRINE').classes('text-slate-500 text-xs font-bold tracking-wider')
             
             with ui.card().classes('bg-slate-900 w-full p-3 border-l-4 border-red-500'):
@@ -61,7 +55,6 @@ def create_layout(nav_funcs: Dict[str, Callable]) -> ui.column:
     # ---------------------------------------------------------
     # 3. MAIN CONTENT CONTAINER
     # ---------------------------------------------------------
-    # This container is returned to main.py so it can be cleared and refilled
     content = ui.column().classes('w-full items-center min-h-screen bg-slate-950')
     
     return content
