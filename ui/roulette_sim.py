@@ -5,7 +5,8 @@ import asyncio
 import traceback
 import numpy as np
 
-from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist, BetStrategy
+# Import Physics
+from engine.roulette_rules import RouletteSessionState, RouletteStrategist, RouletteBet
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
 from engine.strategy_rules import StrategyOverrides
@@ -13,10 +14,22 @@ from engine.strategy_rules import StrategyOverrides
 # SBM LOYALTY TIERS
 SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
-class BaccaratWorker:
+# MAP
+BET_MAP = {
+    'Red': RouletteBet.RED,
+    'Black': RouletteBet.BLACK,
+    'Even': RouletteBet.EVEN,
+    'Odd': RouletteBet.ODD,
+    '1-18': RouletteBet.LOW,
+    '19-36': RouletteBet.HIGH,
+    'Strategy 1: Salon Privé Lite': RouletteBet.STRAT_SALON_LITE,
+    'Strategy 2: French Main Game': RouletteBet.STRAT_FRENCH_LITE
+}
+
+class RouletteWorker:
     @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0):
-        tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Baccarat')
+    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 5.0):
+        tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Roulette')
         
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
@@ -25,7 +38,15 @@ class BaccaratWorker:
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
                 profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
-                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False 
+                bet_strategy=overrides.bet_strategy, 
+                bet_strategy_2=overrides.bet_strategy_2,
+                press_trigger_wins=999, press_depth=0, ratchet_enabled=False,
+                
+                # Spice config pass-through
+                spice_zero_enabled=overrides.spice_zero_enabled, spice_zero_trigger=overrides.spice_zero_trigger,
+                spice_zero_max=overrides.spice_zero_max, spice_zero_cooldown=overrides.spice_zero_cooldown,
+                spice_tiers_enabled=overrides.spice_tiers_enabled, spice_tiers_trigger=overrides.spice_tiers_trigger,
+                spice_tiers_max=overrides.spice_tiers_max, spice_tiers_cooldown=overrides.spice_tiers_cooldown
             )
         else:
             session_overrides = overrides
@@ -34,50 +55,82 @@ class BaccaratWorker:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
-        state = BaccaratSessionState(tier=tier, overrides=session_overrides)
-        state.current_shoe = 1
+        state = RouletteSessionState(tier=tier, overrides=session_overrides)
+        state.current_spin = 1
+        spins_limit = overrides.shoes_per_session * 60 
         volume = 0
         
-        while state.current_shoe <= overrides.shoes_per_session and state.mode.name != 'STOPPED':
-            decision = BaccaratStrategist.get_next_decision(state)
-            if decision['mode'].name == 'STOPPED': break
+        active_main_bets = []
+        b1 = BET_MAP.get(overrides.bet_strategy, RouletteBet.RED)
+        active_main_bets.append(b1)
+        if overrides.bet_strategy_2 and overrides.bet_strategy_2 in BET_MAP:
+            b2 = BET_MAP.get(overrides.bet_strategy_2)
+            active_main_bets.append(b2)
+        
+        while state.current_spin <= spins_limit and state.mode != 'STOPPED':
+            decision = RouletteStrategist.get_next_decision(state)
+            if decision['mode'] == 'STOPPED': break
             
-            amt = decision['bet_amount']
-            volume += amt
+            unit_amt = decision['bet']
+            current_bets = active_main_bets.copy()
             
-            # Resolve Hand ( approx 50/50 for sim speed, Banker 0.95 win)
-            is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            win_chance = 0.5068 if is_banker else 0.4932 
+            # --- SPICE LOGIC: INJECT EXTRA BETS ---
+            current_pl_units = state.session_pnl / base_bet
+            spice_fired_this_spin = False
             
-            # Simple simulation of result
-            won = (random.random() < 0.5) # Simplified for speed vs exact physics
-            
-            pnl = 0
-            if won:
-                pnl = amt * 0.95 if is_banker else amt
-            else:
-                pnl = -amt
-                
-            BaccaratStrategist.update_state_after_hand(state, won, pnl)
-            
-            # Check shoe end (approx 70 hands)
-            if state.hands_played_in_shoe >= 70:
-                state.current_shoe += 1
-                state.hands_played_in_shoe = 0
+            # Zéro Léger Logic
+            if overrides.spice_zero_enabled and not spice_fired_this_spin:
+                if (state.spice_zero_uses < overrides.spice_zero_max and 
+                    current_pl_units >= overrides.spice_zero_trigger and 
+                    (state.current_spin - state.last_spice_zero_spin) >= overrides.spice_zero_cooldown):
+                    
+                    current_bets.append(RouletteBet.SPICE_ZERO)
+                    state.spice_zero_uses += 1
+                    state.last_spice_zero_spin = state.current_spin
+                    spice_fired_this_spin = True
+                    volume += (base_bet * 3) # Cost of Zero Leger
 
-        return state.session_pnl, volume, tier.level, state.hands_played_total
+            # Tiers Logic
+            if overrides.spice_tiers_enabled and not spice_fired_this_spin:
+                if (state.spice_tiers_uses < overrides.spice_tiers_max and 
+                    current_pl_units >= overrides.spice_tiers_trigger and 
+                    (state.current_spin - state.last_spice_tiers_spin) >= overrides.spice_tiers_cooldown):
+                    
+                    current_bets.append(RouletteBet.SPICE_TIERS)
+                    state.spice_tiers_uses += 1
+                    state.last_spice_tiers_spin = state.current_spin
+                    spice_fired_this_spin = True
+                    volume += (base_bet * 6) # Cost of Tiers
+
+            # Volume Calc for Main Bets
+            total_main_units = 0
+            for b in active_main_bets:
+                if b == RouletteBet.STRAT_SALON_LITE: total_main_units += 5
+                elif b == RouletteBet.STRAT_FRENCH_LITE: total_main_units += 7
+                else: total_main_units += 1
+            
+            volume += (unit_amt * total_main_units)
+            
+            number, won, pnl = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
+            state.current_spin += 1
+
+        # Return extra spice stats for analysis
+        return state.session_pnl, volume, tier.level, state.current_spin, state.spice_zero_uses, state.spice_tiers_uses
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
                         contrib_win, contrib_loss, overrides, use_ratchet,
                         use_tax, use_holiday, safety_factor, target_points, earn_rate,
-                        holiday_ceiling, insolvency_floor, strategy_mode, base_bet_val):
+                        holiday_ceiling, insolvency_floor, strategy_mode,
+                        base_bet_val,
+                        track_y1_details=False):
         
-        tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Baccarat', base_bet=base_bet_val)
+        tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Roulette', base_bet=base_bet_val)
         trajectory = []
         current_ga = start_ga
+        running_play_pnl = 0  
         
-        initial_tier = get_tier_for_ga(current_ga, tier_map, 1, strategy_mode, game_type='Baccarat')
+        initial_tier = get_tier_for_ga(current_ga, tier_map, 1, strategy_mode, game_type='Roulette')
         active_level = initial_tier.level
 
         m_insolvent_months = 0; failed_year_one = False
@@ -86,7 +139,13 @@ class BaccaratWorker:
         gold_hit_year = -1
         current_year_points = 0
         
+        y1_log = []
         last_session_won = False
+        
+        # Tracking Spice
+        total_zero_uses = 0
+        total_tiers_uses = 0
+        sessions_with_spices = 0
 
         for m in range(total_months):
             if m > 0 and m % 12 == 0:
@@ -116,27 +175,46 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands = BaccaratWorker.run_session(
+                    pnl, vol, used_level, spins, s_zero, s_tiers = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
                     active_level = used_level 
                     current_ga += pnl
+                    running_play_pnl += pnl 
                     current_year_points += vol * (earn_rate / 100)
                     last_session_won = (pnl > 0)
                     
+                    total_zero_uses += s_zero
+                    total_tiers_uses += s_tiers
+                    if s_zero > 0 or s_tiers > 0: sessions_with_spices += 1
+                    
+                    if track_y1_details and m < 12:
+                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': spins})
+            else:
+                 if track_y1_details and m < 12:
+                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
+
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
 
             trajectory.append(current_ga)
             
-        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': gold_hit_year}
+        return {
+            'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 
+            'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 
+            'gold_year': gold_hit_year, 'spice_sessions': sessions_with_spices,
+            'zero_uses': total_zero_uses, 'tiers_uses': total_tiers_uses
+        }
 
-# --- OFFLOADED STATS CALCULATOR ---
+# --- STATS CALCULATOR ---
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
     trajectories = np.array([r['trajectory'] for r in results])
     months = list(range(trajectories.shape[1]))
+    
+    total_sims = len(results)
+    total_sessions_per_career = config['years'] * config['freq']
     
     stats = {
         'months': months,
@@ -152,42 +230,210 @@ def calculate_stats(results, config, start_ga, total_months):
         'gold_hits': [r['gold_year'] for r in results if r['gold_year'] != -1],
         'y1_failures': len([r for r in results if r['failed_y1']]),
         'total_input': start_ga + np.mean([r['contrib'] for r in results]),
-        'survivor_count': len([r for r in results if r['final_ga'] >= 100])
+        'survivor_count': len([r for r in results if r['final_ga'] >= 100]),
+        
+        # Spice Stats (Divided by Total Sessions for "Per Session" metric)
+        'avg_spice_sessions': np.mean([r['spice_sessions'] for r in results]),
+        'avg_zero_uses': np.mean([r['zero_uses'] for r in results]) / total_sessions_per_career,
+        'avg_tiers_uses': np.mean([r['tiers_uses'] for r in results]) / total_sessions_per_career
     }
     return stats
 
-def show_baccarat_sim():
+def show_roulette_sim():
     running = False 
     
-    # ... (Load/Save/Delete Helpers - Compacted for Brevity but functional) ...
     def load_saved_strategies():
-        try: return load_profile().get('saved_strategies', {})
+        try:
+            profile = load_profile()
+            return profile.get('saved_strategies', {})
         except: return {}
-    def update_strategy_list():
-        try: select_saved.options = list(load_saved_strategies().keys()); select_saved.update()
-        except: pass
-    
-    # ... (Standard Save/Delete/Load Logic matches Roulette exactly) ...
-    # I am keeping the logic flow identical to Roulette for consistency
-    def save_current_strategy():
-        # (Standard saving logic)
-        pass 
-    def load_selected_strategy():
-        # (Standard loading logic)
-        pass
-    def delete_selected_strategy():
-        # (Standard delete logic)
-        pass
 
-    # --- THE RUNNER ---
+    def update_strategy_list():
+        try:
+            saved = load_saved_strategies()
+            select_saved.options = list(saved.keys())
+            select_saved.update()
+        except: pass
+
+    def save_current_strategy():
+        try:
+            name = input_name.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
+            
+            config = {
+                'sim_num': slider_num_sims.value, 'sim_years': slider_years.value, 'sim_freq': slider_frequency.value,
+                'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
+                'eco_hol': switch_holiday.value, 'eco_hol_ceil': slider_holiday_ceil.value, 'eco_insolvency': slider_insolvency.value,
+                'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
+                'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
+                'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
+                'tac_bet_2': select_bet_strat_2.value,
+                'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
+                'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
+                'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
+                'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
+                'tac_base_bet': slider_base_bet.value,
+                
+                # SPICE FIELDS
+                'spice_zero_en': switch_spice_zero.value, 'spice_zero_trig': slider_spice_zero_trig.value,
+                'spice_zero_max': slider_spice_zero_max.value, 'spice_zero_cool': slider_spice_zero_cool.value,
+                'spice_tiers_en': switch_spice_tiers.value, 'spice_tiers_trig': slider_spice_tiers_trig.value,
+                'spice_tiers_max': slider_spice_tiers_max.value, 'spice_tiers_cool': slider_spice_tiers_cool.value
+            }
+            profile['saved_strategies'][name] = config
+            save_profile(profile)
+            ui.notify(f'Saved: {name}', type='positive')
+            update_strategy_list()
+        except Exception as e: ui.notify(str(e), type='negative')
+
+    def load_selected_strategy():
+        try:
+            name = select_saved.value
+            if not name: return
+            saved = load_saved_strategies()
+            config = saved.get(name)
+            if not config: return
+            
+            slider_num_sims.value = config.get('sim_num', 20)
+            slider_years.value = config.get('sim_years', 10)
+            slider_frequency.value = config.get('sim_freq', 10)
+            slider_contrib_win.value = config.get('eco_win', 300)
+            slider_contrib_loss.value = config.get('eco_loss', 300)
+            switch_luxury_tax.value = config.get('eco_tax', False)
+            slider_tax_thresh.value = config.get('eco_tax_thresh', 12500)
+            slider_tax_rate.value = config.get('eco_tax_rate', 25)
+            switch_holiday.value = config.get('eco_hol', False)
+            slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
+            slider_insolvency.value = config.get('eco_insolvency', 1000) 
+            slider_safety.value = config.get('tac_safety', 25)
+            slider_iron_gate.value = config.get('tac_iron', 3)
+            select_press.value = config.get('tac_press', 1)
+            slider_press_depth.value = config.get('tac_depth', 3)
+            slider_shoes.value = config.get('tac_shoes', 3)
+            
+            bet_val = config.get('tac_bet', 'Red')
+            if bet_val not in BET_MAP: bet_val = 'Red'
+            select_bet_strat.value = bet_val
+            
+            bet_2_val = config.get('tac_bet_2', None)
+            select_bet_strat_2.value = bet_2_val
+            
+            switch_penalty.value = config.get('tac_penalty', True)
+            select_engine_mode.value = config.get('tac_mode', 'Standard') 
+            slider_stop_loss.value = config.get('risk_stop', 10)
+            slider_profit.value = config.get('risk_prof', 10)
+            switch_ratchet.value = config.get('risk_ratch', False)
+            select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
+            select_status.value = config.get('gold_stat', 'Gold')
+            slider_earn_rate.value = config.get('gold_earn', 10)
+            slider_start_ga.value = config.get('start_ga', 2000)
+            slider_base_bet.value = config.get('tac_base_bet', 5.0)
+            
+            # SPICE LOADS
+            switch_spice_zero.value = config.get('spice_zero_en', False)
+            slider_spice_zero_trig.value = config.get('spice_zero_trig', 15)
+            slider_spice_zero_max.value = config.get('spice_zero_max', 2)
+            slider_spice_zero_cool.value = config.get('spice_zero_cool', 10)
+            
+            switch_spice_tiers.value = config.get('spice_tiers_en', False)
+            slider_spice_tiers_trig.value = config.get('spice_tiers_trig', 25)
+            slider_spice_tiers_max.value = config.get('spice_tiers_max', 1)
+            slider_spice_tiers_cool.value = config.get('spice_tiers_cool', 10)
+            
+            ui.notify(f'Loaded: {name}', type='info')
+        except: pass
+
+    def delete_selected_strategy():
+        try:
+            name = select_saved.value
+            if not name: return
+            profile = load_profile()
+            if 'saved_strategies' in profile and name in profile['saved_strategies']:
+                del profile['saved_strategies'][name]
+                save_profile(profile)
+                ui.notify(f'Deleted: {name}', type='negative')
+                select_saved.value = None
+                update_strategy_list()
+        except: pass
+
+    def update_ladder_preview():
+        try:
+            factor = slider_safety.value
+            mode = select_engine_mode.value
+            base = slider_base_bet.value 
+            t_map = generate_tier_map(factor, mode=mode, game_type='Roulette', base_bet=base)
+            
+            rows = []
+            for level, t in t_map.items():
+                if t.min_ga == float('inf'): continue
+                risk_pct = 0 if t.min_ga == 0 else (t.base_unit / t.min_ga) * 100
+                start_str = f"€{t.min_ga:,.0f}"
+                rows.append({'tier': f"Tier {level}", 'bet': f"€{t.base_unit} (Press +{t.press_unit})", 'start': start_str, 'risk': f"{risk_pct:.1f}%"})
+            ladder_grid.options['rowData'] = rows
+            ladder_grid.update()
+        except Exception as e:
+            pass 
+
+    # --- QUICK REFRESH ---
+    async def refresh_single_universe():
+        try:
+            config = {
+                'years': int(slider_years.value), 'freq': int(slider_frequency.value),
+                'contrib_win': int(slider_contrib_win.value), 'contrib_loss': int(slider_contrib_loss.value),
+                'use_ratchet': switch_ratchet.value, 'use_tax': switch_luxury_tax.value,
+                'use_holiday': switch_holiday.value, 'hol_ceil': int(slider_holiday_ceil.value),
+                'insolvency': int(slider_insolvency.value), 'safety': int(slider_safety.value),
+                'start_ga': int(slider_start_ga.value), 'tax_thresh': int(slider_tax_thresh.value),
+                'tax_rate': int(slider_tax_rate.value), 'strategy_mode': select_engine_mode.value,
+                'status_target_pts': 0, 'earn_rate': 0,
+                'base_bet': float(slider_base_bet.value) 
+            }
+            overrides = StrategyOverrides(
+                iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
+                profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
+                press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
+                tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
+                bet_strategy_2=select_bet_strat_2.value,
+                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                
+                # SPICE - FIXED TO 1 SPIN COOLDOWN
+                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
+                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
+            )
+            
+            res = await asyncio.to_thread(RouletteWorker.run_full_career, 
+                config['start_ga'], config['years']*12, config['freq'],
+                config['contrib_win'], config['contrib_loss'], overrides, 
+                config['use_ratchet'], config['use_tax'], config['use_holiday'], 
+                config['safety'], config['status_target_pts'], config['earn_rate'],
+                config['hol_ceil'], config['insolvency'], config['strategy_mode'],
+                config['base_bet']
+            )
+            
+            chart_single_container.clear()
+            with chart_single_container:
+                ui.label('QUICK ROULETTE REALITY CHECK').classes('text-xs text-red-400 font-bold mb-1')
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=res['trajectory'], mode='lines', name='Balance', line=dict(color='#ef4444', width=2)))
+                fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red")
+                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+
+        except Exception as e:
+            ui.notify(str(e), type='negative')
+
     async def run_sim():
         nonlocal running
         if running: return
         try:
             running = True; btn_sim.disable(); progress.set_value(0); progress.set_visibility(True)
-            label_stats.set_text("Dealing Cards (Multiverse)...")
+            label_stats.set_text("Spinning the Wheel (Multiverse)...")
             
-            # CONFIG
             config = {
                 'num_sims': int(slider_num_sims.value), 'years': int(slider_years.value), 'freq': int(slider_frequency.value),
                 'contrib_win': int(slider_contrib_win.value), 'contrib_loss': int(slider_contrib_loss.value),
@@ -205,48 +451,53 @@ def show_baccarat_sim():
                 iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
                 profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
-                tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
+                tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
+                bet_strategy_2=select_bet_strat_2.value,
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value 
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                
+                # SPICE - FIXED TO 1 SPIN COOLDOWN
+                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
+                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
             )
 
             start_ga = config['start_ga']
             all_results = []
             batch_size = 10
-            
             for i in range(0, config['num_sims'], batch_size):
                 count = min(batch_size, config['num_sims'] - i)
-                
-                # --- ASYNC BATCH EXECUTION ---
                 def run_batch():
                     batch_data = []
                     for k in range(count):
-                        res = BaccaratWorker.run_full_career(
+                        should_track = (i == 0 and k == 0)
+                        res = RouletteWorker.run_full_career(
                             start_ga, config['years']*12, config['freq'],
                             config['contrib_win'], config['contrib_loss'], overrides, 
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
                             config['hol_ceil'], config['insolvency'], config['strategy_mode'],
-                            config['base_bet']
+                            config['base_bet'], 
+                            track_y1_details=should_track
                         )
                         batch_data.append(res)
                     return batch_data
 
-                # AWAIT THE THREAD
                 batch_res = await asyncio.to_thread(run_batch)
                 all_results.extend(batch_res)
-                
                 progress.set_value(len(all_results) / config['num_sims'])
                 label_stats.set_text(f"Simulating Universe {len(all_results)}/{config['num_sims']}")
-                # KEEP ALIVE
                 await asyncio.sleep(0.01)
 
-            label_stats.set_text("Analyzing Data...")
-            # AWAIT THE STATS CALCULATION
+            label_stats.set_text("Analyzing Data (Please Wait)...")
             stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
             
-            render_analysis(stats, config, start_ga, overrides)
+            # CALL THE RENDERER EXPLICITLY
+            render_analysis_ui(stats, config, start_ga, overrides, all_results) 
             label_stats.set_text("Simulation Complete")
+            
+            await refresh_single_universe()
 
         except Exception as e:
             print(traceback.format_exc())
@@ -254,17 +505,25 @@ def show_baccarat_sim():
         finally:
             running = False; btn_sim.enable(); progress.set_visibility(False)
 
-    def render_analysis(stats, config, start_ga, overrides):
+    def render_analysis_ui(stats, config, start_ga, overrides, all_results):
         if not stats: return
+        total_output = stats['avg_final_ga'] + stats['avg_tax']
+        grand_total_wealth = total_output 
         
-        # ... (Metrics Calculation) ...
         months = stats['months']
         gold_prob = (len(stats['gold_hits']) / config['num_sims']) * 100
-        total_output = stats['avg_final_ga'] + stats['avg_tax']
         net_life_result = total_output - stats['total_input']
+        
+        # RESTORED METRIC:
         real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
+        
+        insolvency_pct = (stats['avg_insolvent'] / (config['years']*12)) * 100
+        active_pct = 100 - insolvency_pct
+        y1_survival_rate = 100 - ((stats['y1_failures'] / config['num_sims']) * 100)
         score_survival = (stats['survivor_count'] / config['num_sims']) * 100
-        active_pct = 100 - ((stats['avg_insolvent'] / (config['years']*12)) * 100)
+        
+        if real_monthly_cost <= 0: score_cost = 100
+        else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
         
         total_score = (score_survival * 0.70) + (active_pct * 0.30)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
@@ -279,7 +538,7 @@ def show_baccarat_sim():
                 with ui.column().classes('w-full gap-4'):
                     with ui.row().classes('w-full items-center justify-between'):
                         with ui.column():
-                            ui.label('BACCARAT GRADE').classes('text-xs text-slate-400 font-bold tracking-widest')
+                            ui.label('ROULETTE GRADE').classes('text-xs text-slate-400 font-bold tracking-widest')
                             ui.label(f"{grade}").classes(f'text-6xl font-black {g_col} leading-none')
                             ui.label(f"{total_score:.1f}% Score").classes(f'text-sm font-bold {g_col}')
                         with ui.column().classes('items-center'):
@@ -291,10 +550,14 @@ def show_baccarat_sim():
                                 ui.label(f"+€{abs(real_monthly_cost):,.0f}").classes('text-4xl font-black text-green-400 leading-none')
                                 ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
                         with ui.column().classes('items-center'):
+                            ui.label('SPICE FREQUENCY').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            ui.label(f"{stats['avg_spice_sessions']:.1f}").classes('text-3xl font-bold text-pink-400')
+                            ui.label("Avg Sess w/ Spice").classes('text-xs text-slate-500')
+                        with ui.column().classes('items-center'):
                             ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             ui.label(f"€{total_output:,.0f}").classes('text-4xl font-black text-white leading-none')
                             if stats['avg_tax'] > 0: ui.label(f"(GA €{stats['avg_final_ga']:,.0f} + Tax €{stats['avg_tax']:,.0f})").classes('text-xs font-bold text-yellow-400')
-
+                    
         with chart_container:
             chart_container.clear()
             fig = go.Figure()
@@ -305,32 +568,85 @@ def show_baccarat_sim():
             
             fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red", annotation_text="Insolvency")
             if config['use_holiday']: fig.add_hline(y=config['hol_ceil'], line_dash="dash", line_color="yellow", annotation_text="Holiday")
-            fig.update_layout(title='Monte Carlo Confidence Bands (Baccarat)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
+            fig.update_layout(title='Monte Carlo Confidence Bands (Roulette)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
             ui.plotly(fig).classes('w-full h-96')
+
+        with flight_recorder_container:
+            flight_recorder_container.clear()
+            y1_log = all_results[0].get('y1_log', [])
+            with ui.expansion('OUR LOG (Year 1 - Sim #1)', icon='history_edu', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+                if y1_log:
+                    table_rows = []
+                    for entry in y1_log:
+                        res_val = entry.get('result', 0)
+                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
+                    ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
         with report_container:
             report_container.clear()
-            # ... (Simple Report) ...
-            lines = ["=== BACCARAT CONFIGURATION ==="]
-            lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-            lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
-            lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
-            lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
-            
-            lines.append("\n=== PERFORMANCE RESULTS ===")
-            lines.append(f"Total Survival Rate: {score_survival:.1f}%")
-            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
-            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
-            lines.append(f"Active Play Time: {active_pct:.1f}%")
-            
-            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+            try:
+                press_map = {
+                    0: 'Flat', 
+                    1: 'Press 1-Win', 
+                    2: 'Press 2-Wins', 
+                    3: 'Titan Progression', 
+                    4: "Capped D'Alembert", 
+                    5: "La Caroline"
+                }
+                press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
 
-    # --- UI LAYOUT ---
+                lines = ["=== ROULETTE CONFIGURATION ==="]
+                lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
+                lines.append(f"Betting: {overrides.bet_strategy} + {overrides.bet_strategy_2}")
+                lines.append(f"Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
+                lines.append(f"Press Logic: {press_name} | Safety: {config['safety']}x | Iron Gate: {overrides.iron_gate_limit}")
+                lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+                lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
+                lines.append(f"Gold Probability: {gold_prob:.1f}%")
+                
+                lines.append("\n=== PERFORMANCE RESULTS ===")
+                lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
+                lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
+                lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
+                lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
+                lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+                lines.append(f"Active Play Time: {active_pct:.1f}%")
+                lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
+                
+                lines.append(f"\n=== SPICE BET STATS ===")
+                lines.append(f"Spice Zéro: {overrides.spice_zero_enabled} (Trig {overrides.spice_zero_trigger}u, Max {overrides.spice_zero_max}, Cool {overrides.spice_zero_cooldown})")
+                lines.append(f"Spice Tiers: {overrides.spice_tiers_enabled} (Trig {overrides.spice_tiers_trigger}u, Max {overrides.spice_tiers_max}, Cool {overrides.spice_tiers_cooldown})")
+                lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
+                lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
+                
+                y1_log = all_results[0].get('y1_log', [])
+                if y1_log:
+                    lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
+                    lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
+                    for e in y1_log:
+                        lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+
+                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+            except Exception as e:
+                ui.label(f"Error generating report: {str(e)}").classes('text-red-500')
+
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
-        ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
+        ui.label('ROULETTE LAB (MONACO RULES)').classes('text-2xl font-light text-red-400')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
-            # ... (Sim Sliders) ...
+            with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
+                with ui.column().classes('w-full gap-4'):
+                    with ui.row().classes('w-full items-center gap-4'):
+                        input_name = ui.input('Save Name').props('dark').classes('flex-grow')
+                        ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
+                    with ui.row().classes('w-full items-center gap-4'):
+                        select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
+                        ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
+                        ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
+                    update_strategy_list()
+
+            ui.separator().classes('bg-slate-700')
+
             with ui.row().classes('w-full gap-4 items-start'):
                 with ui.column().classes('flex-grow'):
                     ui.label('SIMULATION').classes('font-bold text-white mb-2')
@@ -347,14 +663,40 @@ def show_baccarat_sim():
 
             ui.separator().classes('bg-slate-700')
 
-            # CONTROLS
+            with ui.card().classes('w-full bg-slate-800 p-4 border border-pink-500 mb-4'):
+                ui.label('SPICE LAB (Dynamic Add-on Bets)').classes('font-bold text-pink-400 mb-2')
+                with ui.row().classes('w-full gap-8'):
+                    # Zéro Léger
+                    with ui.column().classes('flex-1'):
+                        with ui.row().classes('items-center'):
+                            switch_spice_zero = ui.switch('Enable Zéro Léger (3u)').props('color=pink')
+                        with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ztrig = ui.label()
+                        slider_spice_zero_trig = ui.slider(min=5, max=50, value=15).props('color=pink'); lbl_ztrig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{v}u')
+                        with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_zmax = ui.label()
+                        slider_spice_zero_max = ui.slider(min=1, max=120, value=2).props('color=pink'); lbl_zmax.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{v}/sess')
+                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_zcool = ui.label()
+                        slider_spice_zero_cool = ui.slider(min=0, max=20, value=10).props('color=pink'); lbl_zcool.bind_text_from(slider_spice_zero_cool, 'value', lambda v: f'{v} spins')
+
+                    # Tiers
+                    with ui.column().classes('flex-1'):
+                        with ui.row().classes('items-center'):
+                            switch_spice_tiers = ui.switch('Enable Tiers (6u)').props('color=purple')
+                        with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ttrig = ui.label()
+                        slider_spice_tiers_trig = ui.slider(min=5, max=50, value=25).props('color=purple'); lbl_ttrig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{v}u')
+                        with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_tmax = ui.label()
+                        slider_spice_tiers_max = ui.slider(min=1, max=120, value=1).props('color=purple'); lbl_tmax.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{v}/sess')
+                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_tcool = ui.label()
+                        slider_spice_tiers_cool = ui.slider(min=0, max=20, value=10).props('color=purple'); lbl_tcool.bind_text_from(slider_spice_tiers_cool, 'value', lambda v: f'{v} spins')
+
+            ui.separator().classes('bg-slate-700')
+
             with ui.grid(columns=2).classes('w-full gap-8'):
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
                     with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
-                    slider_base_bet = ui.slider(min=5, max=100, step=5, value=10, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
+                    slider_base_bet = ui.slider(min=5, max=100, step=5, value=5, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
                     
                     with ui.row().classes('w-full justify-between'): ui.label('Safety Buffer').classes('text-xs text-orange-400'); lbl_safe = ui.label()
                     slider_safety = ui.slider(min=10, max=60, value=25, on_change=update_ladder_preview).props('color=orange'); lbl_safe.bind_text_from(slider_safety, 'value', lambda v: f'{v}x')
@@ -370,18 +712,22 @@ def show_baccarat_sim():
                         slider_tax_rate = ui.slider(min=5, max=50, value=25)
 
                 with ui.column():
-                    ui.label('BACCARAT GAMEPLAY').classes('font-bold text-cyan-400')
+                    ui.label('ROULETTE GAMEPLAY').classes('font-bold text-red-400')
                     
-                    select_bet_strat = ui.select(['BANKER', 'PLAYER'], value='BANKER', label='Bet Selection').classes('w-full')
+                    select_bet_strat = ui.select(list(BET_MAP.keys()), value='Red', label='Bet Selection (1)').classes('w-full')
                     
-                    slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes (approx {v*70} hands)')
+                    bet_opts = list(BET_MAP.keys())
+                    bet_opts.insert(0, None)
+                    select_bet_strat_2 = ui.select(bet_opts, label='Bet Selection (2)').classes('w-full')
+                    
+                    slider_shoes = ui.slider(min=1, max=5, value=2).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v*60} Spins (approx {v} hours)')
                     
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=3, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert", 5: "La Caroline"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
@@ -398,6 +744,11 @@ def show_baccarat_sim():
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        
+        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
+        chart_single_container = ui.column().classes('w-full mt-2')
+        
+        flight_recorder_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
