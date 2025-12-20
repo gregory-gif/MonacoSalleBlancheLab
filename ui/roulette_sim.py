@@ -159,6 +159,32 @@ class RouletteWorker:
             
         return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': gold_hit_year, 'total_volume': m_total_volume}
 
+# --- STATS CALCULATOR (OFFLOADED TO PREVENT CRASH) ---
+def calculate_stats(results, config, start_ga, total_months):
+    if not results: return None
+    
+    # HEAVY NUMPY OPERATIONS HAPPEN HERE
+    trajectories = np.array([r['trajectory'] for r in results])
+    months = list(range(trajectories.shape[1]))
+    
+    stats = {
+        'months': months,
+        'min_band': np.min(trajectories, axis=0),
+        'max_band': np.max(trajectories, axis=0),
+        'p25_band': np.percentile(trajectories, 25, axis=0),
+        'p75_band': np.percentile(trajectories, 75, axis=0),
+        'mean_line': np.mean(trajectories, axis=0),
+        'median_line': np.median(trajectories, axis=0),
+        'avg_final_ga': np.mean([r['final_ga'] for r in results]),
+        'avg_tax': np.mean([r['tax'] for r in results]),
+        'avg_insolvent': np.mean([r['insolvent_months'] for r in results]),
+        'gold_hits': [r['gold_year'] for r in results if r['gold_year'] != -1],
+        'y1_failures': len([r for r in results if r['failed_y1']]),
+        'total_input': start_ga + np.mean([r['contrib'] for r in results]),
+        'survivor_count': len([r for r in results if r['final_ga'] >= 100])
+    }
+    return stats
+
 def show_roulette_sim():
     running = False 
     
@@ -379,10 +405,17 @@ def show_roulette_sim():
                 all_results.extend(batch_res)
                 progress.set_value(len(all_results) / config['num_sims'])
                 label_stats.set_text(f"Simulating Universe {len(all_results)}/{config['num_sims']}")
+                # KEEP ALIVE HACK
+                await asyncio.sleep(0.01)
 
-            label_stats.set_text("Analyzing Data...")
-            render_analysis(all_results, config, start_ga, overrides)
+            label_stats.set_text("Analyzing Data (Please Wait)...")
+            
+            # --- FIX: OFFLOAD HEAVY MATH TO THREAD ---
+            stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
+            
+            render_analysis_ui(stats, config, start_ga, overrides, all_results) # Pass pre-calc stats
             label_stats.set_text("Simulation Complete")
+            
             await refresh_single_universe()
 
         except Exception as e:
@@ -391,39 +424,26 @@ def show_roulette_sim():
         finally:
             running = False; btn_sim.enable(); progress.set_visibility(False)
 
-    def render_analysis(results, config, start_ga, overrides):
-        if not results: return
-        trajectories = np.array([r['trajectory'] for r in results])
-        months = list(range(trajectories.shape[1]))
-        min_band = np.min(trajectories, axis=0); max_band = np.max(trajectories, axis=0)
-        p25_band = np.percentile(trajectories, 25, axis=0); p75_band = np.percentile(trajectories, 75, axis=0)
-        mean_line = np.mean(trajectories, axis=0); median_line = np.median(trajectories, axis=0)
+    # --- UI RENDERER (Now Stats are Pre-calculated) ---
+    def render_analysis_ui(stats, config, start_ga, overrides, all_results):
+        if not stats: return
         
-        avg_final_ga = np.mean([r['final_ga'] for r in results])
-        avg_tax = np.mean([r['tax'] for r in results])
-        avg_insolvent = np.mean([r['insolvent_months'] for r in results])
+        # Unpack
+        months = stats['months']
+        gold_prob = (len(stats['gold_hits']) / config['num_sims']) * 100
+        total_output = stats['avg_final_ga'] + stats['avg_tax']
+        net_life_result = total_output - stats['total_input']
+        net_cost = stats['total_input'] - total_output
+        real_monthly_cost = net_cost / (config['years']*12)
         
-        gold_hits = [r['gold_year'] for r in results if r['gold_year'] != -1]
-        gold_prob = (len(gold_hits) / len(results)) * 100
-        
-        total_months = config['years'] * 12
-        insolvency_pct = (avg_insolvent / total_months) * 100
-        y1_failures = len([r for r in results if r['failed_y1']])
-        y1_survival_rate = 100 - ((y1_failures / len(results)) * 100)
+        insolvency_pct = (stats['avg_insolvent'] / (config['years']*12)) * 100
         active_pct = 100 - insolvency_pct
-        total_input = start_ga + np.mean([r['contrib'] for r in results])
+        y1_survival_rate = 100 - ((stats['y1_failures'] / config['num_sims']) * 100)
+        score_survival = (stats['survivor_count'] / config['num_sims']) * 100
         
-        total_output = avg_final_ga + avg_tax
-        grand_total_wealth = total_output
-        net_life_result = total_output - total_input
-        net_cost = total_input - total_output
-        real_monthly_cost = net_cost / total_months
-        survivor_count = len([r for r in results if r['final_ga'] >= 100])
-        score_survival = (survivor_count / len(results)) * 100
         if real_monthly_cost <= 0: score_cost = 100
         else: score_cost = max(0, 100 - (real_monthly_cost / 3)) 
         
-        # Simplified scoring for Roulette
         total_score = (score_survival * 0.70) + (active_pct * 0.30)
         if total_score >= 90: grade, g_col = "A", "text-green-400"
         elif total_score >= 80: grade, g_col = "B", "text-blue-400"
@@ -451,15 +471,15 @@ def show_roulette_sim():
                         with ui.column().classes('items-center'):
                             ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             ui.label(f"€{total_output:,.0f}").classes('text-4xl font-black text-white leading-none')
-                            if avg_tax > 0: ui.label(f"(GA €{avg_final_ga:,.0f} + Tax €{avg_tax:,.0f})").classes('text-xs font-bold text-yellow-400')
+                            if stats['avg_tax'] > 0: ui.label(f"(GA €{stats['avg_final_ga']:,.0f} + Tax €{stats['avg_tax']:,.0f})").classes('text-xs font-bold text-yellow-400')
                     
         with chart_container:
             chart_container.clear()
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.5)', line=dict(color='rgba(255,255,255,0.3)', width=1), name='Best/Worst'))
-            fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
-            fig.add_trace(go.Scatter(x=months, y=mean_line, mode='lines', name='Average', line=dict(color='white', width=2)))
-            fig.add_trace(go.Scatter(x=months, y=median_line, mode='lines', name='Median', line=dict(color='yellow', width=2, dash='dot')))
+            fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([stats['max_band'], stats['min_band'][::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.5)', line=dict(color='rgba(255,255,255,0.3)', width=1), name='Best/Worst'))
+            fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([stats['p75_band'], stats['p25_band'][::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
+            fig.add_trace(go.Scatter(x=months, y=stats['mean_line'], mode='lines', name='Average', line=dict(color='white', width=2)))
+            fig.add_trace(go.Scatter(x=months, y=stats['median_line'], mode='lines', name='Median', line=dict(color='yellow', width=2, dash='dot')))
             
             fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red", annotation_text="Insolvency")
             if config['use_holiday']: fig.add_hline(y=config['hol_ceil'], line_dash="dash", line_color="yellow", annotation_text="Holiday")
@@ -468,8 +488,8 @@ def show_roulette_sim():
 
         with flight_recorder_container:
             flight_recorder_container.clear()
-            y1_log = results[0].get('y1_log', [])
-            # MODIFIED TITLE AND ICON AS REQUESTED
+            y1_log = all_results[0].get('y1_log', [])
+            # OUR LOG
             with ui.expansion('OUR LOG (Year 1 - Sim #1)', icon='history_edu', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
                 if y1_log:
                     table_rows = []
@@ -480,8 +500,6 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
-            
-            # --- UPDATED REPORT SECTION ---
             press_map = {
                 0: 'Flat', 
                 1: 'Press 1-Win', 
@@ -510,7 +528,6 @@ def show_roulette_sim():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
             
-            y1_log = results[0].get('y1_log', [])
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
@@ -557,7 +574,6 @@ def show_roulette_sim():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
-                    # NEW SLIDER FOR BASE BET
                     with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
                     slider_base_bet = ui.slider(min=5, max=100, step=5, value=5, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
                     
