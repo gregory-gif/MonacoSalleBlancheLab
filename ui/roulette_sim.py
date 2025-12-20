@@ -205,7 +205,7 @@ class RouletteWorker:
             'zero_uses': total_zero_uses, 'tiers_uses': total_tiers_uses
         }
 
-# --- STATS CALCULATOR (OFFLOADED) ---
+# --- STATS CALCULATOR ---
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
     trajectories = np.array([r['trajectory'] for r in results])
@@ -229,7 +229,6 @@ def calculate_stats(results, config, start_ga, total_months):
         'total_input': start_ga + np.mean([r['contrib'] for r in results]),
         'survivor_count': len([r for r in results if r['final_ga'] >= 100]),
         
-        # Spice Stats
         'avg_spice_sessions': np.mean([r['spice_sessions'] for r in results]),
         'avg_zero_uses': np.mean([r['zero_uses'] for r in results]),
         'avg_tiers_uses': np.mean([r['tiers_uses'] for r in results])
@@ -275,9 +274,9 @@ def show_roulette_sim():
                 
                 # SPICE FIELDS
                 'spice_zero_en': switch_spice_zero.value, 'spice_zero_trig': slider_spice_zero_trig.value,
-                'spice_zero_max': slider_spice_zero_max.value,
+                'spice_zero_max': slider_spice_zero_max.value, 'spice_zero_cool': slider_spice_zero_cool.value,
                 'spice_tiers_en': switch_spice_tiers.value, 'spice_tiers_trig': slider_spice_tiers_trig.value,
-                'spice_tiers_max': slider_spice_tiers_max.value
+                'spice_tiers_max': slider_spice_tiers_max.value, 'spice_tiers_cool': slider_spice_tiers_cool.value
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -332,9 +331,12 @@ def show_roulette_sim():
             switch_spice_zero.value = config.get('spice_zero_en', False)
             slider_spice_zero_trig.value = config.get('spice_zero_trig', 15)
             slider_spice_zero_max.value = config.get('spice_zero_max', 2)
+            slider_spice_zero_cool.value = config.get('spice_zero_cool', 10)
+            
             switch_spice_tiers.value = config.get('spice_tiers_en', False)
             slider_spice_tiers_trig.value = config.get('spice_tiers_trig', 25)
             slider_spice_tiers_max.value = config.get('spice_tiers_max', 1)
+            slider_spice_tiers_cool.value = config.get('spice_tiers_cool', 10)
             
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
@@ -395,9 +397,9 @@ def show_roulette_sim():
                 
                 # SPICE
                 spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
-                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=10,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
                 spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
-                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=10
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
             )
             
             res = await asyncio.to_thread(RouletteWorker.run_full_career, 
@@ -450,11 +452,11 @@ def show_roulette_sim():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
-                # SPICE
+                # SPICE - FIXED TO 1 SPIN COOLDOWN
                 spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
-                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=10,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
                 spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
-                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=10
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
             )
 
             start_ga = config['start_ga']
@@ -486,6 +488,8 @@ def show_roulette_sim():
 
             label_stats.set_text("Analyzing Data (Please Wait)...")
             stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
+            
+            # CALL THE RENDERER EXPLICITLY
             render_analysis_ui(stats, config, start_ga, overrides, all_results) 
             label_stats.set_text("Simulation Complete")
             
@@ -505,8 +509,9 @@ def show_roulette_sim():
         months = stats['months']
         gold_prob = (len(stats['gold_hits']) / config['num_sims']) * 100
         net_life_result = total_output - stats['total_input']
-        net_cost = stats['total_input'] - total_output
-        real_monthly_cost = net_cost / (config['years']*12)
+        
+        # RESTORED METRIC:
+        real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
         
         insolvency_pct = (stats['avg_insolvent'] / (config['years']*12)) * 100
         active_pct = 100 - insolvency_pct
@@ -565,7 +570,6 @@ def show_roulette_sim():
         with flight_recorder_container:
             flight_recorder_container.clear()
             y1_log = all_results[0].get('y1_log', [])
-            # OUR LOG
             with ui.expansion('OUR LOG (Year 1 - Sim #1)', icon='history_edu', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
                 if y1_log:
                     table_rows = []
@@ -576,47 +580,51 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
-            press_map = {
-                0: 'Flat', 
-                1: 'Press 1-Win', 
-                2: 'Press 2-Wins', 
-                3: 'Titan Progression', 
-                4: "Capped D'Alembert", 
-                5: "La Caroline"
-            }
-            press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
+            try:
+                press_map = {
+                    0: 'Flat', 
+                    1: 'Press 1-Win', 
+                    2: 'Press 2-Wins', 
+                    3: 'Titan Progression', 
+                    4: "Capped D'Alembert", 
+                    5: "La Caroline"
+                }
+                press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
 
-            lines = ["=== ROULETTE CONFIGURATION ==="]
-            lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-            lines.append(f"Betting: {overrides.bet_strategy} + {overrides.bet_strategy_2}")
-            lines.append(f"Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
-            lines.append(f"Press Logic: {press_name} | Safety: {config['safety']}x | Iron Gate: {overrides.iron_gate_limit}")
-            lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
-            lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
-            lines.append(f"Gold Probability: {gold_prob:.1f}%")
-            
-            lines.append("\n=== PERFORMANCE RESULTS ===")
-            lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
-            lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
-            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
-            lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
-            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
-            lines.append(f"Active Play Time: {active_pct:.1f}%")
-            lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
-            
-            lines.append(f"\n=== SPICE BET STATS ===")
-            lines.append(f"Spice Zéro: {overrides.spice_zero_enabled} (Trig {overrides.spice_zero_trigger}u, Max {overrides.spice_zero_max})")
-            lines.append(f"Spice Tiers: {overrides.spice_tiers_enabled} (Trig {overrides.spice_tiers_trigger}u, Max {overrides.spice_tiers_max})")
-            lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
-            lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
-            
-            if y1_log:
-                lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
-                lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
-                for e in y1_log:
-                    lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+                lines = ["=== ROULETTE CONFIGURATION ==="]
+                lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
+                lines.append(f"Betting: {overrides.bet_strategy} + {overrides.bet_strategy_2}")
+                lines.append(f"Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
+                lines.append(f"Press Logic: {press_name} | Safety: {config['safety']}x | Iron Gate: {overrides.iron_gate_limit}")
+                lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+                lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
+                lines.append(f"Gold Probability: {gold_prob:.1f}%")
+                
+                lines.append("\n=== PERFORMANCE RESULTS ===")
+                lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
+                lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
+                lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f} (GA + Tax)")
+                lines.append(f"Net Life PnL: €{net_life_result:,.0f}")
+                lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+                lines.append(f"Active Play Time: {active_pct:.1f}%")
+                lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
+                
+                lines.append(f"\n=== SPICE BET STATS ===")
+                lines.append(f"Spice Zéro: {overrides.spice_zero_enabled} (Trig {overrides.spice_zero_trigger}u, Max {overrides.spice_zero_max}, Cool {overrides.spice_zero_cooldown})")
+                lines.append(f"Spice Tiers: {overrides.spice_tiers_enabled} (Trig {overrides.spice_tiers_trigger}u, Max {overrides.spice_tiers_max}, Cool {overrides.spice_tiers_cooldown})")
+                lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
+                lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
+                
+                y1_log = all_results[0].get('y1_log', [])
+                if y1_log:
+                    lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
+                    lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
+                    for e in y1_log:
+                        lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
 
-            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+            except Exception as e:
+                ui.label(f"Error generating report: {str(e)}").classes('text-red-500')
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('ROULETTE LAB (MONACO RULES)').classes('text-2xl font-light text-red-400')
@@ -661,7 +669,9 @@ def show_roulette_sim():
                         with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ztrig = ui.label()
                         slider_spice_zero_trig = ui.slider(min=5, max=50, value=15).props('color=pink'); lbl_ztrig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{v}u')
                         with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_zmax = ui.label()
-                        slider_spice_zero_max = ui.slider(min=1, max=5, value=2).props('color=pink'); lbl_zmax.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{v}/sess')
+                        slider_spice_zero_max = ui.slider(min=1, max=120, value=2).props('color=pink'); lbl_zmax.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{v}/sess')
+                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_zcool = ui.label()
+                        slider_spice_zero_cool = ui.slider(min=0, max=20, value=10).props('color=pink'); lbl_zcool.bind_text_from(slider_spice_zero_cool, 'value', lambda v: f'{v} spins')
 
                     # Tiers
                     with ui.column().classes('flex-1'):
@@ -670,7 +680,9 @@ def show_roulette_sim():
                         with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ttrig = ui.label()
                         slider_spice_tiers_trig = ui.slider(min=5, max=50, value=25).props('color=purple'); lbl_ttrig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{v}u')
                         with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_tmax = ui.label()
-                        slider_spice_tiers_max = ui.slider(min=1, max=5, value=1).props('color=purple'); lbl_tmax.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{v}/sess')
+                        slider_spice_tiers_max = ui.slider(min=1, max=120, value=1).props('color=purple'); lbl_tmax.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{v}/sess')
+                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_tcool = ui.label()
+                        slider_spice_tiers_cool = ui.slider(min=0, max=20, value=10).props('color=purple'); lbl_tcool.bind_text_from(slider_spice_tiers_cool, 'value', lambda v: f'{v} spins')
 
             ui.separator().classes('bg-slate-700')
 
