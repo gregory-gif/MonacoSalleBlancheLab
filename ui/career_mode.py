@@ -5,11 +5,9 @@ import asyncio
 import traceback
 from copy import deepcopy
 
-# --- CRITICAL INTEGRATION: IMPORT BOTH WORKERS ---
-# FIX: Use BaccaratWorker instead of SimulationWorker
-from ui.simulator import BaccaratWorker 
+# --- CRITICAL FIX: IMPORT BACCARAT WORKER ---
+from ui.simulator import BaccaratWorker # Changed from SimulationWorker
 from ui.roulette_sim import RouletteWorker
-from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist # Explicit import
 from engine.strategy_rules import StrategyOverrides, BetStrategy, PlayMode
 from engine.tier_params import get_tier_for_ga, generate_tier_map
 from utils.persistence import load_profile
@@ -106,7 +104,7 @@ class CareerManager:
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE (FIXED CALL) ---
+                    # --- BACCARAT ENGINE (Updated Call) ---
                     pnl, vol, used_lvl, hands = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
@@ -130,7 +128,7 @@ class CareerManager:
     def _extract_params(config):
         mode = config.get('tac_mode', 'Standard')
         safety = config.get('tac_safety', 25)
-        base_bet = config.get('tac_base_bet', 10.0) # Added base bet extraction
+        base_bet = config.get('tac_base_bet', 10.0)
         
         # 1. Detect Game Type
         bet_val = config.get('tac_bet', 'Banker')
@@ -143,7 +141,6 @@ class CareerManager:
         if game_type == 'Baccarat':
             bet_strat_obj = BetStrategy.BANKER if bet_val == 'BANKER' else BetStrategy.PLAYER
         else:
-            # For Roulette, we pass the string directly (e.g., 'Red')
             bet_strat_obj = bet_val 
 
         overrides = StrategyOverrides(
@@ -205,7 +202,6 @@ def show_career_mode():
         legs.pop(index)
         refresh_leg_ui()
 
-    # --- QUICK SINGLE REFRESH ---
     async def refresh_single_career():
         if not legs: return
         try:
@@ -258,7 +254,6 @@ def show_career_mode():
         sessions = slider_freq.value
         num_sims = slider_num_sims.value 
         
-        # --- BATCH EXECUTION ---
         def run_batch():
             batch_results = []
             for _ in range(num_sims):
@@ -276,7 +271,6 @@ def show_career_mode():
 
         results = await asyncio.to_thread(run_batch)
         
-        # --- DATA PROCESSING ---
         trajectories = np.array([r['trajectory'] for r in results])
         months = list(range(trajectories.shape[1]))
         
@@ -297,7 +291,6 @@ def show_career_mode():
         progress.set_visibility(False)
         with results_area:
             
-            # 1. SCOREBOARD
             with ui.row().classes('w-full justify-between mb-4'):
                 with ui.card().classes('bg-slate-800 p-2'):
                     ui.label('SURVIVAL RATE').classes('text-xs text-slate-400')
@@ -316,7 +309,6 @@ def show_career_mode():
                     col_str = "text-red-400" if avg_cost > 0 else "text-green-400"
                     ui.label(val_str).classes(f'text-2xl font-black {col_str}')
 
-            # 2. MULTIVERSE CHART
             ui.label('THE MULTIVERSE (Probabilities)').classes('text-sm font-bold text-slate-400 mt-2')
             fig_multi = go.Figure()
             fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Range'))
@@ -329,7 +321,6 @@ def show_career_mode():
             fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
             ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
 
-            # 3. SINGLE REALITY CHART
             ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
             
             sim1_traj = results[0]['trajectory']
@@ -352,7 +343,6 @@ def show_career_mode():
             
             ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
 
-            # 4. LOG
             with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
                 for l in sim1_log:
                     color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
