@@ -286,8 +286,6 @@ def show_simulator():
             
             for i in range(0, config['num_sims'], batch_size):
                 count = min(batch_size, config['num_sims'] - i)
-                
-                # --- ASYNC BATCH EXECUTION ---
                 def run_batch():
                     batch_data = []
                     for k in range(count):
@@ -304,7 +302,6 @@ def show_simulator():
 
                 batch_res = await asyncio.to_thread(run_batch)
                 all_results.extend(batch_res)
-                
                 progress.set_value(len(all_results) / config['num_sims'])
                 label_stats.set_text(f"Simulating Universe {len(all_results)}/{config['num_sims']}")
                 await asyncio.sleep(0.01)
@@ -325,9 +322,10 @@ def show_simulator():
         
         months = stats['months']
         total_output = stats['avg_final_ga'] + stats['avg_tax']
-        # DEFINE THE VARIABLE HERE TO FIX THE ERROR
+        # --- DEFINED HERE ---
         grand_total_wealth = total_output 
         
+        net_life_result = total_output - stats['total_input']
         real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
         score_survival = (stats['survivor_count'] / config['num_sims']) * 100
         active_pct = 100 - ((stats['avg_insolvent'] / (config['years']*12)) * 100)
