@@ -5,7 +5,7 @@ import asyncio
 import traceback
 import numpy as np
 
-# IMPORT THE NEW RULES
+# IMPORT RULES
 from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist
 from engine.strategy_rules import StrategyOverrides, BetStrategy
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
@@ -67,11 +67,13 @@ class BaccaratWorker:
     def run_full_career(start_ga, total_months, sessions_per_year, 
                         contrib_win, contrib_loss, overrides, use_ratchet,
                         use_tax, use_holiday, safety_factor, target_points, earn_rate,
-                        holiday_ceiling, insolvency_floor, strategy_mode, base_bet_val):
+                        holiday_ceiling, insolvency_floor, strategy_mode, base_bet_val,
+                        track_y1_details=False): # ADDED THIS FLAG
         
         tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Baccarat', base_bet=base_bet_val)
         trajectory = []
         current_ga = start_ga
+        running_play_pnl = 0
         
         initial_tier = get_tier_for_ga(current_ga, tier_map, 1, strategy_mode, game_type='Baccarat')
         active_level = initial_tier.level
@@ -82,6 +84,7 @@ class BaccaratWorker:
         gold_hit_year = -1
         current_year_points = 0
         
+        y1_log = []
         last_session_won = False
 
         for m in range(total_months):
@@ -117,15 +120,27 @@ class BaccaratWorker:
                     )
                     active_level = used_level 
                     current_ga += pnl
+                    running_play_pnl += pnl
                     current_year_points += vol * (earn_rate / 100)
                     last_session_won = (pnl > 0)
                     
+                    # LOGGING LOGIC RESTORED
+                    if track_y1_details and m < 12:
+                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': hands})
+            else:
+                 if track_y1_details and m < 12:
+                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
+
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
 
             trajectory.append(current_ga)
             
-        return {'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 'failed_y1': failed_year_one, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': gold_hit_year}
+        return {
+            'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 
+            'failed_y1': failed_year_one, 'tax': m_tax, 'contrib': m_contrib, 'gold_year': gold_hit_year,
+            'y1_log': y1_log # RETURN THE LOG
+        }
 
 def calculate_stats(results, config, start_ga, total_months):
     if not results: return None
@@ -251,6 +266,57 @@ def show_simulator():
             ladder_grid.update()
         except Exception as e: pass 
 
+    # --- QUICK REFRESH ---
+    async def refresh_single_universe():
+        try:
+            config = {
+                'years': int(slider_years.value), 'freq': int(slider_frequency.value),
+                'contrib_win': int(slider_contrib_win.value), 'contrib_loss': int(slider_contrib_loss.value),
+                'use_ratchet': switch_ratchet.value, 'use_tax': switch_luxury_tax.value,
+                'use_holiday': switch_holiday.value, 'hol_ceil': int(slider_holiday_ceil.value),
+                'insolvency': int(slider_insolvency.value), 'safety': int(slider_safety.value),
+                'start_ga': int(slider_start_ga.value), 'tax_thresh': int(slider_tax_thresh.value),
+                'tax_rate': int(slider_tax_rate.value), 'strategy_mode': select_engine_mode.value,
+                'status_target_pts': 0, 'earn_rate': 0,
+                'base_bet': float(slider_base_bet.value) 
+            }
+            overrides = StrategyOverrides(
+                iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
+                profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
+                press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
+                tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
+                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                
+                # SPICE - FIXED TO 1 SPIN COOLDOWN
+                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
+                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
+            )
+            
+            res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
+                config['start_ga'], config['years']*12, config['freq'],
+                config['contrib_win'], config['contrib_loss'], overrides, 
+                config['use_ratchet'], config['use_tax'], config['use_holiday'], 
+                config['safety'], config['status_target_pts'], config['earn_rate'],
+                config['hol_ceil'], config['insolvency'], config['strategy_mode'],
+                config['base_bet'],
+                False # No tracking for single refresh
+            )
+            
+            chart_single_container.clear()
+            with chart_single_container:
+                ui.label('QUICK BACCARAT REALITY CHECK').classes('text-xs text-cyan-400 font-bold mb-1')
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=res['trajectory'], mode='lines', name='Balance', line=dict(color='#06b6d4', width=2)))
+                fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red")
+                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+
+        except Exception as e:
+            ui.notify(str(e), type='negative')
+
     async def run_sim():
         nonlocal running
         if running: return
@@ -277,25 +343,32 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value 
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                
+                # SPICE - FIXED TO 1 SPIN COOLDOWN
+                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
+                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
+                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
             )
 
             start_ga = config['start_ga']
             all_results = []
             batch_size = 10
-            
             for i in range(0, config['num_sims'], batch_size):
                 count = min(batch_size, config['num_sims'] - i)
                 def run_batch():
                     batch_data = []
                     for k in range(count):
+                        should_track = (i == 0 and k == 0)
                         res = BaccaratWorker.run_full_career(
                             start_ga, config['years']*12, config['freq'],
                             config['contrib_win'], config['contrib_loss'], overrides, 
                             config['use_ratchet'], config['use_tax'], config['use_holiday'], 
                             config['safety'], config['status_target_pts'], config['earn_rate'],
                             config['hol_ceil'], config['insolvency'], config['strategy_mode'],
-                            config['base_bet']
+                            config['base_bet'], 
+                            track_y1_details=should_track # HERE WE PASS THE TRACKING FLAG
                         )
                         batch_data.append(res)
                     return batch_data
@@ -308,8 +381,10 @@ def show_simulator():
 
             label_stats.set_text("Analyzing Data...")
             stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
-            render_analysis(stats, config, start_ga, overrides)
+            render_analysis(stats, config, start_ga, overrides, all_results) 
             label_stats.set_text("Simulation Complete")
+            
+            await refresh_single_universe()
 
         except Exception as e:
             print(traceback.format_exc())
@@ -317,12 +392,11 @@ def show_simulator():
         finally:
             running = False; btn_sim.enable(); progress.set_visibility(False)
 
-    def render_analysis(stats, config, start_ga, overrides):
+    def render_analysis(stats, config, start_ga, overrides, all_results):
         if not stats: return
         
         months = stats['months']
         total_output = stats['avg_final_ga'] + stats['avg_tax']
-        # --- DEFINED HERE ---
         grand_total_wealth = total_output 
         
         net_life_result = total_output - stats['total_input']
@@ -372,6 +446,17 @@ def show_simulator():
             fig.update_layout(title='Monte Carlo Confidence Bands (Baccarat)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
             ui.plotly(fig).classes('w-full h-96')
 
+        with flight_recorder_container:
+            flight_recorder_container.clear()
+            y1_log = all_results[0].get('y1_log', [])
+            with ui.expansion('OUR LOG (Year 1 - Sim #1)', icon='history_edu', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+                if y1_log:
+                    table_rows = []
+                    for entry in y1_log:
+                        res_val = entry.get('result', 0)
+                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
+                    ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
+
         with report_container:
             report_container.clear()
             lines = ["=== BACCARAT CONFIGURATION ==="]
@@ -384,6 +469,13 @@ def show_simulator():
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
+            
+            if y1_log:
+                lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
+                lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
+                for e in y1_log:
+                    lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
@@ -408,7 +500,33 @@ def show_simulator():
 
             ui.separator().classes('bg-slate-700')
 
-            # CONTROLS
+            with ui.card().classes('w-full bg-slate-800 p-4 border border-pink-500 mb-4'):
+                ui.label('SPICE LAB (Dynamic Add-on Bets)').classes('font-bold text-pink-400 mb-2')
+                with ui.row().classes('w-full gap-8'):
+                    # Zéro Léger
+                    with ui.column().classes('flex-1'):
+                        with ui.row().classes('items-center'):
+                            switch_spice_zero = ui.switch('Enable Zéro Léger (3u)').props('color=pink')
+                        with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ztrig = ui.label()
+                        slider_spice_zero_trig = ui.slider(min=5, max=50, value=15).props('color=pink'); lbl_ztrig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{v}u')
+                        with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_zmax = ui.label()
+                        slider_spice_zero_max = ui.slider(min=1, max=120, value=2).props('color=pink'); lbl_zmax.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{v}/sess')
+                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_zcool = ui.label()
+                        slider_spice_zero_cool = ui.slider(min=0, max=20, value=10).props('color=pink'); lbl_zcool.bind_text_from(slider_spice_zero_cool, 'value', lambda v: f'{v} spins')
+
+                    # Tiers
+                    with ui.column().classes('flex-1'):
+                        with ui.row().classes('items-center'):
+                            switch_spice_tiers = ui.switch('Enable Tiers (6u)').props('color=purple')
+                        with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ttrig = ui.label()
+                        slider_spice_tiers_trig = ui.slider(min=5, max=50, value=25).props('color=purple'); lbl_ttrig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{v}u')
+                        with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_tmax = ui.label()
+                        slider_spice_tiers_max = ui.slider(min=1, max=120, value=1).props('color=purple'); lbl_tmax.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{v}/sess')
+                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_tcool = ui.label()
+                        slider_spice_tiers_cool = ui.slider(min=0, max=20, value=10).props('color=purple'); lbl_tcool.bind_text_from(slider_spice_tiers_cool, 'value', lambda v: f'{v} spins')
+
+            ui.separator().classes('bg-slate-700')
+
             with ui.grid(columns=2).classes('w-full gap-8'):
                 with ui.column():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
@@ -459,6 +577,11 @@ def show_simulator():
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
+        
+        ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
+        chart_single_container = ui.column().classes('w-full mt-2')
+        
+        flight_recorder_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
