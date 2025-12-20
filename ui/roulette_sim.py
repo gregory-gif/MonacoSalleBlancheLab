@@ -405,15 +405,13 @@ def show_roulette_sim():
                 all_results.extend(batch_res)
                 progress.set_value(len(all_results) / config['num_sims'])
                 label_stats.set_text(f"Simulating Universe {len(all_results)}/{config['num_sims']}")
-                # KEEP ALIVE HACK
                 await asyncio.sleep(0.01)
 
             label_stats.set_text("Analyzing Data (Please Wait)...")
             
-            # --- FIX: OFFLOAD HEAVY MATH TO THREAD ---
             stats = await asyncio.to_thread(calculate_stats, all_results, config, start_ga, config['years']*12)
             
-            render_analysis_ui(stats, config, start_ga, overrides, all_results) # Pass pre-calc stats
+            render_analysis_ui(stats, config, start_ga, overrides, all_results) 
             label_stats.set_text("Simulation Complete")
             
             await refresh_single_universe()
@@ -424,14 +422,16 @@ def show_roulette_sim():
         finally:
             running = False; btn_sim.enable(); progress.set_visibility(False)
 
-    # --- UI RENDERER (Now Stats are Pre-calculated) ---
+    # --- UI RENDERER ---
     def render_analysis_ui(stats, config, start_ga, overrides, all_results):
         if not stats: return
         
-        # Unpack
+        # FIX: CALCULATE grand_total_wealth HERE to prevent NameError
+        total_output = stats['avg_final_ga'] + stats['avg_tax']
+        grand_total_wealth = total_output 
+        
         months = stats['months']
         gold_prob = (len(stats['gold_hits']) / config['num_sims']) * 100
-        total_output = stats['avg_final_ga'] + stats['avg_tax']
         net_life_result = total_output - stats['total_input']
         net_cost = stats['total_input'] - total_output
         real_monthly_cost = net_cost / (config['years']*12)
@@ -500,6 +500,8 @@ def show_roulette_sim():
 
         with report_container:
             report_container.clear()
+            
+            # --- UPDATED REPORT SECTION ---
             press_map = {
                 0: 'Flat', 
                 1: 'Press 1-Win', 
@@ -528,6 +530,7 @@ def show_roulette_sim():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
             
+            y1_log = all_results[0].get('y1_log', [])
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
@@ -574,6 +577,7 @@ def show_roulette_sim():
                     ui.label('TACTICS').classes('font-bold text-purple-400')
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
+                    # NEW SLIDER FOR BASE BET
                     with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
                     slider_base_bet = ui.slider(min=5, max=100, step=5, value=5, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
                     
