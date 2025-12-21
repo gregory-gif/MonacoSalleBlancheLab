@@ -223,10 +223,10 @@ def show_simulator():
             slider_press_depth.value = config.get('tac_depth', 3)
             slider_shoes.value = config.get('tac_shoes', 3)
             
-            # --- FIX: SAFE LOAD OF BET STRATEGY ---
-            val_bet = config.get('tac_bet', 'BANKER')
-            if not val_bet: val_bet = 'BANKER'
-            select_bet_strat.value = val_bet
+            # --- FIX: DEFAULT TO 'BANKER' IF MISSING ---
+            raw_bet = config.get('tac_bet', 'BANKER')
+            if not raw_bet: raw_bet = 'BANKER'
+            select_bet_strat.value = raw_bet
             
             switch_penalty.value = config.get('tac_penalty', True)
             select_engine_mode.value = config.get('tac_mode', 'Standard') 
@@ -285,7 +285,7 @@ def show_simulator():
                 'base_bet': float(slider_base_bet.value) 
             }
             
-            # --- FIX: SAFE BET STRAT FETCH ---
+            # --- FIX: SAFETY GUARD FOR BET SELECTION ---
             raw_bet = select_bet_strat.value
             if not raw_bet: raw_bet = 'BANKER'
             
@@ -341,7 +341,7 @@ def show_simulator():
                 'base_bet': float(slider_base_bet.value)
             }
             
-            # --- FIX: SAFE BET STRAT FETCH ---
+            # --- FIX: SAFETY GUARD FOR BET SELECTION ---
             raw_bet = select_bet_strat.value
             if not raw_bet: raw_bet = 'BANKER'
             
@@ -542,7 +542,6 @@ def show_simulator():
                     
                     slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes (approx {v*70} hands)')
                     
-                    # UPDATED LIMITS FOR FLEXIBILITY
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=1, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     
@@ -559,14 +558,12 @@ def show_simulator():
             with ui.row().classes('w-full items-center justify-between'):
                 with ui.column():
                      ui.label('Starting Capital').classes('text-xs text-green-400')
-                     # UPDATED LIMIT FOR HIGH ROLLERS
                      slider_start_ga = ui.slider(min=0, max=100000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
                      with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=50, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         
-        # DEFINING THE CONTAINERS
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
         
