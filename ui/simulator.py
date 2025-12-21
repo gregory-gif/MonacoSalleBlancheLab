@@ -426,7 +426,6 @@ def show_simulator():
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([stats['p75_band'], stats['p25_band'][::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
             fig.add_trace(go.Scatter(x=months, y=stats['mean_line'], mode='lines', name='Average', line=dict(color='white', width=2)))
             fig.add_trace(go.Scatter(x=months, y=stats['median_line'], mode='lines', name='Median', line=dict(color='yellow', width=2, dash='dot')))
-            
             fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red", annotation_text="Insolvency")
             if config['use_holiday']: fig.add_hline(y=config['hol_ceil'], line_dash="dash", line_color="yellow", annotation_text="Holiday")
             fig.update_layout(title='Monte Carlo Confidence Bands (Baccarat)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
@@ -455,13 +454,11 @@ def show_simulator():
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
-            
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
                 for e in y1_log:
                     lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
-
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
@@ -469,6 +466,21 @@ def show_simulator():
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
         
         with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
+            
+            # STRATEGY LIBRARY RESTORED HERE
+            with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
+                with ui.column().classes('w-full gap-4'):
+                    with ui.row().classes('w-full items-center gap-4'):
+                        input_name = ui.input('Save Name').props('dark').classes('flex-grow')
+                        ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
+                    with ui.row().classes('w-full items-center gap-4'):
+                        select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
+                        ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
+                        ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
+                    update_strategy_list()
+
+            ui.separator().classes('bg-slate-700')
+
             # ... (Sim Sliders) ...
             with ui.row().classes('w-full gap-4 items-start'):
                 with ui.column().classes('flex-grow'):
