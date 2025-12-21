@@ -222,7 +222,12 @@ def show_simulator():
             select_press.value = config.get('tac_press', 1)
             slider_press_depth.value = config.get('tac_depth', 3)
             slider_shoes.value = config.get('tac_shoes', 3)
-            select_bet_strat.value = config.get('tac_bet', 'BANKER')
+            
+            # --- FIX: SAFE LOAD OF BET STRATEGY ---
+            val_bet = config.get('tac_bet', 'BANKER')
+            if not val_bet: val_bet = 'BANKER'
+            select_bet_strat.value = val_bet
+            
             switch_penalty.value = config.get('tac_penalty', True)
             select_engine_mode.value = config.get('tac_mode', 'Standard') 
             slider_stop_loss.value = config.get('risk_stop', 10)
@@ -279,11 +284,16 @@ def show_simulator():
                 'status_target_pts': 0, 'earn_rate': 0,
                 'base_bet': float(slider_base_bet.value) 
             }
+            
+            # --- FIX: SAFE BET STRAT FETCH ---
+            raw_bet = select_bet_strat.value
+            if not raw_bet: raw_bet = 'BANKER'
+            
             overrides = StrategyOverrides(
                 iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
                 profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
-                tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
+                tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 spice_zero_enabled=False, spice_tiers_enabled=False
@@ -331,11 +341,15 @@ def show_simulator():
                 'base_bet': float(slider_base_bet.value)
             }
             
+            # --- FIX: SAFE BET STRAT FETCH ---
+            raw_bet = select_bet_strat.value
+            if not raw_bet: raw_bet = 'BANKER'
+            
             overrides = StrategyOverrides(
                 iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
                 profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
-                tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, select_bet_strat.value),
+                tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 spice_zero_enabled=False, spice_tiers_enabled=False
@@ -426,6 +440,7 @@ def show_simulator():
             fig.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([stats['p75_band'], stats['p25_band'][::-1]]), fill='toself', fillcolor='rgba(0, 255, 136, 0.3)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
             fig.add_trace(go.Scatter(x=months, y=stats['mean_line'], mode='lines', name='Average', line=dict(color='white', width=2)))
             fig.add_trace(go.Scatter(x=months, y=stats['median_line'], mode='lines', name='Median', line=dict(color='yellow', width=2, dash='dot')))
+            
             fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red", annotation_text="Insolvency")
             if config['use_holiday']: fig.add_hline(y=config['hol_ceil'], line_dash="dash", line_color="yellow", annotation_text="Holiday")
             fig.update_layout(title='Monte Carlo Confidence Bands (Baccarat)', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'), margin=dict(l=20, r=20, t=40, b=20))
@@ -527,8 +542,10 @@ def show_simulator():
                     
                     slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes (approx {v*70} hands)')
                     
+                    # UPDATED LIMITS FOR FLEXIBILITY
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
-                    slider_profit = ui.slider(min=3, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
+                    slider_profit = ui.slider(min=1, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
+                    
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
@@ -542,11 +559,14 @@ def show_simulator():
             with ui.row().classes('w-full items-center justify-between'):
                 with ui.column():
                      ui.label('Starting Capital').classes('text-xs text-green-400')
-                     slider_start_ga = ui.slider(min=0, max=10000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
-                     with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=20, value=10).props('color=yellow').classes('w-32')
+                     # UPDATED LIMIT FOR HIGH ROLLERS
+                     slider_start_ga = ui.slider(min=0, max=100000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
+                     with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=50, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
+        
+        # DEFINING THE CONTAINERS
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
         
