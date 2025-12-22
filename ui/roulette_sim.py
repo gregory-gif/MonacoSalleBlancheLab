@@ -628,7 +628,8 @@ def show_roulette_sim():
                                 ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
                         with ui.column().classes('items-center'):
                             ui.label('SPICE FREQUENCY').classes('text-[10px] text-slate-500 font-bold tracking-widest')
-                            ui.label(f"{stats['avg_spice_sessions']:.1f}").classes('text-3xl font-bold text-pink-400')
+                            spice_sessions = stats['spice_stats'].get('sessions_with_spices', 0)
+                            ui.label(f"{spice_sessions:.1f}").classes('text-3xl font-bold text-pink-400')
                             ui.label("Avg Sess w/ Spice").classes('text-xs text-slate-500')
                         with ui.column().classes('items-center'):
                             ui.label('GRAND TOTAL WEALTH').classes('text-[10px] text-slate-500 font-bold tracking-widest')
