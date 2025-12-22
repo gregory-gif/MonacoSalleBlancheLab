@@ -1,6 +1,10 @@
 import random
 from dataclasses import dataclass
 from enum import Enum, auto
+from engine.spice_system import (
+    SpiceEngine, SpiceType, SpiceFamily, SpiceRule, GlobalSpiceConfig,
+    DEFAULT_SPICE_CONFIG, DEFAULT_GLOBAL_SPICE_CONFIG
+)
 
 class RouletteBet(Enum):
     # Standard
@@ -36,16 +40,14 @@ class RouletteSessionState:
     consecutive_losses: int = 0
     current_press_streak: int = 0
     locked_profit: float = -999999.0
+    session_start_bankroll: float = 0.0
     
     # Progressions
     dalembert_level: int = 0 
     caroline_level: int = 0
     
-    # Spice State
-    spice_zero_uses: int = 0
-    spice_tiers_uses: int = 0
-    last_spice_zero_spin: int = -999
-    last_spice_tiers_spin: int = -999
+    # Spice Engine v5.0
+    spice_engine: any = None  # Will hold SpiceEngine instance
     
     mode: str = 'PLAYING' 
 
@@ -227,3 +229,110 @@ class RouletteStrategist:
             state.current_press_streak = 0
 
         return number, won, net_pnl
+
+
+# ============================================================================
+# SPICE ENGINE v5.0 INTEGRATION
+# ============================================================================
+
+def create_spice_engine_from_overrides(overrides, unit_size: float = 10.0):
+    """
+    Convert StrategyOverrides spice configuration into a SpiceEngine.
+    
+    Args:
+        overrides: StrategyOverrides containing spice config
+        unit_size: Base unit size in euros
+        
+    Returns:
+        SpiceEngine instance configured from overrides
+    """
+    # Build custom spice config from overrides
+    spice_config = {
+        SpiceType.ZERO_LEGER: SpiceRule(
+            enabled=overrides.spice_zero_leger_enabled,
+            family=SpiceFamily.A_LIGHT,
+            trigger_pl_units=overrides.spice_zero_leger_trigger,
+            max_uses_per_session=overrides.spice_zero_leger_max,
+            cooldown_spins=overrides.spice_zero_leger_cooldown,
+            min_pl_units=overrides.spice_zero_leger_min_pl,
+            max_pl_units=overrides.spice_zero_leger_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="ZERO_LEGER_PATTERN",
+        ),
+        SpiceType.JEU_ZERO: SpiceRule(
+            enabled=overrides.spice_jeu_zero_enabled,
+            family=SpiceFamily.A_LIGHT,
+            trigger_pl_units=overrides.spice_jeu_zero_trigger,
+            max_uses_per_session=overrides.spice_jeu_zero_max,
+            cooldown_spins=overrides.spice_jeu_zero_cooldown,
+            min_pl_units=overrides.spice_jeu_zero_min_pl,
+            max_pl_units=overrides.spice_jeu_zero_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="JEU_ZERO_PATTERN",
+        ),
+        SpiceType.ZERO_CROWN: SpiceRule(
+            enabled=overrides.spice_zero_crown_enabled,
+            family=SpiceFamily.A_LIGHT,
+            trigger_pl_units=overrides.spice_zero_crown_trigger,
+            max_uses_per_session=overrides.spice_zero_crown_max,
+            cooldown_spins=overrides.spice_zero_crown_cooldown,
+            min_pl_units=overrides.spice_zero_crown_min_pl,
+            max_pl_units=overrides.spice_zero_crown_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="ZERO_CROWN_PATTERN",
+        ),
+        SpiceType.TIERS: SpiceRule(
+            enabled=overrides.spice_tiers_enabled,
+            family=SpiceFamily.B_MEDIUM,
+            trigger_pl_units=overrides.spice_tiers_trigger,
+            max_uses_per_session=overrides.spice_tiers_max,
+            cooldown_spins=overrides.spice_tiers_cooldown,
+            min_pl_units=overrides.spice_tiers_min_pl,
+            max_pl_units=overrides.spice_tiers_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="TIERS_PATTERN",
+        ),
+        SpiceType.ORPHELINS: SpiceRule(
+            enabled=overrides.spice_orphelins_enabled,
+            family=SpiceFamily.B_MEDIUM,
+            trigger_pl_units=overrides.spice_orphelins_trigger,
+            max_uses_per_session=overrides.spice_orphelins_max,
+            cooldown_spins=overrides.spice_orphelins_cooldown,
+            min_pl_units=overrides.spice_orphelins_min_pl,
+            max_pl_units=overrides.spice_orphelins_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="ORPHELINS_PATTERN",
+        ),
+        SpiceType.ORPHELINS_PLEIN: SpiceRule(
+            enabled=overrides.spice_orphelins_plein_enabled,
+            family=SpiceFamily.C_PRESTIGE,
+            trigger_pl_units=overrides.spice_orphelins_plein_trigger,
+            max_uses_per_session=overrides.spice_orphelins_plein_max,
+            cooldown_spins=overrides.spice_orphelins_plein_cooldown,
+            min_pl_units=overrides.spice_orphelins_plein_min_pl,
+            max_pl_units=overrides.spice_orphelins_plein_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="ORPHELINS_PLEIN_PATTERN",
+        ),
+        SpiceType.VOISINS: SpiceRule(
+            enabled=overrides.spice_voisins_enabled,
+            family=SpiceFamily.C_PRESTIGE,
+            trigger_pl_units=overrides.spice_voisins_trigger,
+            max_uses_per_session=overrides.spice_voisins_max,
+            cooldown_spins=overrides.spice_voisins_cooldown,
+            min_pl_units=overrides.spice_voisins_min_pl,
+            max_pl_units=overrides.spice_voisins_max_pl,
+            unit_bet_size_eur=unit_size,
+            pattern_id="VOISINS_PATTERN",
+        ),
+    }
+    
+    # Build global config from overrides
+    global_config = GlobalSpiceConfig(
+        max_total_spices_per_session=overrides.spice_global_max_per_session,
+        max_spices_per_spin=overrides.spice_global_max_per_spin,
+        disable_if_caroline_step4=overrides.spice_disable_if_caroline_step4,
+        disable_if_pl_below_zero=overrides.spice_disable_if_pl_below_zero,
+    )
+    
+    return SpiceEngine(spice_config, global_config)

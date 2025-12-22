@@ -32,16 +32,64 @@ class StrategyOverrides:
     shoes_per_session: int = 3
     penalty_box_enabled: bool = True
     
-    # --- SPICE BETS CONFIGURATION (NEW) ---
-    spice_zero_enabled: bool = False
-    spice_zero_trigger: int = 15      # Units of profit needed to activate
-    spice_zero_max: int = 2           # Max times per session
-    spice_zero_cooldown: int = 10     # Spins between fires
+    # --- SPICE BETS CONFIGURATION v5.0 (7 Spice Types) ---
+    # Global Spice Controls
+    spice_global_max_per_session: int = 3
+    spice_global_max_per_spin: int = 1
+    spice_disable_if_caroline_step4: bool = True
+    spice_disable_if_pl_below_zero: bool = True
     
+    # Family A - Light Spices
+    spice_zero_leger_enabled: bool = False
+    spice_zero_leger_trigger: int = 15
+    spice_zero_leger_max: int = 2
+    spice_zero_leger_cooldown: int = 5
+    spice_zero_leger_min_pl: int = 15
+    spice_zero_leger_max_pl: int = 80
+    
+    spice_jeu_zero_enabled: bool = False
+    spice_jeu_zero_trigger: int = 15
+    spice_jeu_zero_max: int = 2
+    spice_jeu_zero_cooldown: int = 5
+    spice_jeu_zero_min_pl: int = 15
+    spice_jeu_zero_max_pl: int = 80
+    
+    spice_zero_crown_enabled: bool = False
+    spice_zero_crown_trigger: int = 15
+    spice_zero_crown_max: int = 2
+    spice_zero_crown_cooldown: int = 5
+    spice_zero_crown_min_pl: int = 15
+    spice_zero_crown_max_pl: int = 80
+    
+    # Family B - Medium Spices
     spice_tiers_enabled: bool = False
     spice_tiers_trigger: int = 25
     spice_tiers_max: int = 1
-    spice_tiers_cooldown: int = 10
+    spice_tiers_cooldown: int = 8
+    spice_tiers_min_pl: int = 25
+    spice_tiers_max_pl: int = 80
+    
+    spice_orphelins_enabled: bool = False
+    spice_orphelins_trigger: int = 25
+    spice_orphelins_max: int = 1
+    spice_orphelins_cooldown: int = 8
+    spice_orphelins_min_pl: int = 25
+    spice_orphelins_max_pl: int = 80
+    
+    # Family C - Prestige Spices
+    spice_orphelins_plein_enabled: bool = False
+    spice_orphelins_plein_trigger: int = 35
+    spice_orphelins_plein_max: int = 1
+    spice_orphelins_plein_cooldown: int = 10
+    spice_orphelins_plein_min_pl: int = 35
+    spice_orphelins_plein_max_pl: int = 100
+    
+    spice_voisins_enabled: bool = False
+    spice_voisins_trigger: int = 35
+    spice_voisins_max: int = 1
+    spice_voisins_cooldown: int = 10
+    spice_voisins_min_pl: int = 35
+    spice_voisins_max_pl: int = 100
     
     # --- TAX ---
     tax_threshold: float = 12500.0

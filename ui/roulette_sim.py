@@ -6,7 +6,11 @@ import traceback
 import numpy as np
 
 # Import Physics
-from engine.roulette_rules import RouletteSessionState, RouletteStrategist, RouletteBet
+from engine.roulette_rules import (
+    RouletteSessionState, RouletteStrategist, RouletteBet,
+    create_spice_engine_from_overrides
+)
+from engine.spice_system import SpiceType, SPICE_PATTERNS, SpiceFamily
 from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
 from utils.persistence import load_profile, save_profile
 from engine.strategy_rules import StrategyOverrides
@@ -35,19 +39,7 @@ class RouletteWorker:
         if is_active_penalty:
             flat_bet = base_bet 
             tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
-            session_overrides = StrategyOverrides(
-                iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
-                bet_strategy=overrides.bet_strategy, 
-                bet_strategy_2=overrides.bet_strategy_2,
-                press_trigger_wins=999, press_depth=0, ratchet_enabled=False,
-                
-                # Spice config pass-through
-                spice_zero_enabled=overrides.spice_zero_enabled, spice_zero_trigger=overrides.spice_zero_trigger,
-                spice_zero_max=overrides.spice_zero_max, spice_zero_cooldown=overrides.spice_zero_cooldown,
-                spice_tiers_enabled=overrides.spice_tiers_enabled, spice_tiers_trigger=overrides.spice_tiers_trigger,
-                spice_tiers_max=overrides.spice_tiers_max, spice_tiers_cooldown=overrides.spice_tiers_cooldown
-            )
+            session_overrides = overrides  # Copy over all overrides including spice config
         else:
             session_overrides = overrides
 
@@ -55,10 +47,19 @@ class RouletteWorker:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
+        # === SPICE ENGINE v5.0 INITIALIZATION ===
+        spice_engine = create_spice_engine_from_overrides(session_overrides, base_bet)
+        spice_engine.reset_session()
+        
         state = RouletteSessionState(tier=tier, overrides=session_overrides)
+        state.spice_engine = spice_engine
+        state.session_start_bankroll = current_ga
         state.current_spin = 1
         spins_limit = overrides.shoes_per_session * 60 
         volume = 0
+        
+        # Track TP for momentum adjustments
+        current_tp = session_overrides.profit_lock_units * base_bet if session_overrides.profit_lock_units > 0 else 999999
         
         active_main_bets = []
         b1 = BET_MAP.get(overrides.bet_strategy, RouletteBet.RED)
@@ -74,33 +75,29 @@ class RouletteWorker:
             unit_amt = decision['bet']
             current_bets = active_main_bets.copy()
             
-            # --- SPICE LOGIC: INJECT EXTRA BETS ---
-            current_pl_units = state.session_pnl / base_bet
-            spice_fired_this_spin = False
+            # === SPICE SYSTEM v5.0: EVALUATE AND FIRE ===
+            spice_engine.reset_spin()
             
-            # Zéro Léger Logic
-            if overrides.spice_zero_enabled and not spice_fired_this_spin:
-                if (state.spice_zero_uses < overrides.spice_zero_max and 
-                    current_pl_units >= overrides.spice_zero_trigger and 
-                    (state.current_spin - state.last_spice_zero_spin) >= overrides.spice_zero_cooldown):
-                    
-                    current_bets.append(RouletteBet.SPICE_ZERO)
-                    state.spice_zero_uses += 1
-                    state.last_spice_zero_spin = state.current_spin
-                    spice_fired_this_spin = True
-                    volume += (base_bet * 3) # Cost of Zero Leger
-
-            # Tiers Logic
-            if overrides.spice_tiers_enabled and not spice_fired_this_spin:
-                if (state.spice_tiers_uses < overrides.spice_tiers_max and 
-                    current_pl_units >= overrides.spice_tiers_trigger and 
-                    (state.current_spin - state.last_spice_tiers_spin) >= overrides.spice_tiers_cooldown):
-                    
-                    current_bets.append(RouletteBet.SPICE_TIERS)
-                    state.spice_tiers_uses += 1
-                    state.last_spice_tiers_spin = state.current_spin
-                    spice_fired_this_spin = True
-                    volume += (base_bet * 6) # Cost of Tiers
+            # Calculate current state for spice evaluation
+            session_pl_units = state.session_pnl / base_bet
+            caroline_at_step4 = (state.caroline_level >= 4)
+            stop_loss_eur = session_overrides.stop_loss_units * base_bet if session_overrides.stop_loss_units > 0 else 999999
+            
+            # Try to fire a spice
+            fired_spice_type = spice_engine.evaluate_and_fire_spice(
+                session_pl_units=session_pl_units,
+                spin_index=state.current_spin,
+                caroline_at_step4=caroline_at_step4,
+                session_start_bankroll=state.session_start_bankroll,
+                current_bankroll=state.session_start_bankroll + state.session_pnl,
+                stop_loss=stop_loss_eur
+            )
+            
+            # Track spice cost in volume
+            if fired_spice_type:
+                pattern = SPICE_PATTERNS[spice_engine.spice_config[fired_spice_type].pattern_id]
+                spice_cost = pattern.unit_cost * base_bet
+                volume += spice_cost
 
             # Volume Calc for Main Bets
             total_main_units = 0
@@ -111,11 +108,33 @@ class RouletteWorker:
             
             volume += (unit_amt * total_main_units)
             
-            number, won, pnl = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
+            # Resolve main bets
+            number, won_main, pnl_main = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
+            
+            # Resolve spice bet (if any)
+            if fired_spice_type:
+                spice_pnl, spice_won = spice_engine.resolve_spice(fired_spice_type, number, base_bet)
+                state.session_pnl += spice_pnl
+                
+                # MOMENTUM TP BOOST on spice win
+                if spice_won and session_overrides.profit_lock_units > 0:
+                    current_tp = spice_engine.apply_momentum_tp_boost(fired_spice_type, current_tp, base_bet)
+                    # Update the session override dynamically
+                    session_overrides.profit_lock_units = int(current_tp / base_bet)
+            
             state.current_spin += 1
 
-        # Return extra spice stats for analysis
-        return state.session_pnl, volume, tier.level, state.current_spin, state.spice_zero_uses, state.spice_tiers_uses
+        # Get comprehensive spice statistics
+        spice_stats = spice_engine.get_statistics()
+        
+        # Return session results + spice stats
+        return (
+            state.session_pnl, 
+            volume, 
+            tier.level, 
+            state.current_spin, 
+            spice_stats
+        )
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -142,10 +161,17 @@ class RouletteWorker:
         y1_log = []
         last_session_won = False
         
-        # Tracking Spice
-        total_zero_uses = 0
-        total_tiers_uses = 0
-        sessions_with_spices = 0
+        # Tracking Spice v5.0 - Comprehensive Statistics
+        all_spice_stats = {
+            'total_spices_used': 0,
+            'spice_wins': 0,
+            'spice_losses': 0,
+            'total_cost': 0.0,
+            'total_payout': 0.0,
+            'momentum_tp_gains': 0.0,
+            'distribution': {st.value: 0 for st in SpiceType},
+            'sessions_with_spices': 0
+        }
 
         for m in range(total_months):
             if m > 0 and m % 12 == 0:
@@ -175,7 +201,7 @@ class RouletteWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, spins, s_zero, s_tiers = RouletteWorker.run_session(
+                    pnl, vol, used_level, spins, spice_stats = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -185,9 +211,20 @@ class RouletteWorker:
                     current_year_points += vol * (earn_rate / 100)
                     last_session_won = (pnl > 0)
                     
-                    total_zero_uses += s_zero
-                    total_tiers_uses += s_tiers
-                    if s_zero > 0 or s_tiers > 0: sessions_with_spices += 1
+                    # Aggregate spice statistics
+                    all_spice_stats['total_spices_used'] += spice_stats['total_spices_used']
+                    all_spice_stats['spice_wins'] += spice_stats['spice_wins']
+                    all_spice_stats['spice_losses'] += spice_stats['spice_losses']
+                    all_spice_stats['total_cost'] += spice_stats['total_cost']
+                    all_spice_stats['total_payout'] += spice_stats['total_payout']
+                    all_spice_stats['momentum_tp_gains'] += spice_stats['momentum_tp_gains']
+                    
+                    # Aggregate distribution
+                    for spice_name, count in spice_stats['distribution'].items():
+                        all_spice_stats['distribution'][spice_name] += count
+                    
+                    if spice_stats['total_spices_used'] > 0:
+                        all_spice_stats['sessions_with_spices'] += 1
                     
                     if track_y1_details and m < 12:
                         y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': spins})
@@ -203,8 +240,9 @@ class RouletteWorker:
         return {
             'trajectory': trajectory, 'final_ga': current_ga, 'insolvent_months': m_insolvent_months, 
             'failed_y1': failed_year_one, 'y1_log': y1_log, 'tax': m_tax, 'contrib': m_contrib, 
-            'gold_year': gold_hit_year, 'spice_sessions': sessions_with_spices,
-            'zero_uses': total_zero_uses, 'tiers_uses': total_tiers_uses
+            'gold_year': gold_hit_year, 
+            # Spice v5.0 comprehensive stats
+            'spice_stats': all_spice_stats
         }
 
 # --- STATS CALCULATOR ---
@@ -215,6 +253,35 @@ def calculate_stats(results, config, start_ga, total_months):
     
     total_sims = len(results)
     total_sessions_per_career = config['years'] * config['freq']
+    
+    # Aggregate spice stats across all runs
+    avg_spice_stats = {
+        'total_spices_used': np.mean([r['spice_stats']['total_spices_used'] for r in results]),
+        'sessions_with_spices': np.mean([r['spice_stats']['sessions_with_spices'] for r in results]),
+        'spice_wins': np.mean([r['spice_stats']['spice_wins'] for r in results]),
+        'spice_losses': np.mean([r['spice_stats']['spice_losses'] for r in results]),
+        'hit_rate': 0.0,
+        'total_cost': np.mean([r['spice_stats']['total_cost'] for r in results]),
+        'total_payout': np.mean([r['spice_stats']['total_payout'] for r in results]),
+        'net_pl': 0.0,
+        'momentum_tp_gains': np.mean([r['spice_stats']['momentum_tp_gains'] for r in results]),
+        'distribution': {}
+    }
+    
+    # Calculate hit rate
+    total_wins = sum([r['spice_stats']['spice_wins'] for r in results])
+    total_losses = sum([r['spice_stats']['spice_losses'] for r in results])
+    if (total_wins + total_losses) > 0:
+        avg_spice_stats['hit_rate'] = total_wins / (total_wins + total_losses)
+    
+    avg_spice_stats['net_pl'] = avg_spice_stats['total_payout'] - avg_spice_stats['total_cost']
+    
+    # Aggregate distribution
+    for spice_type in SpiceType:
+        spice_name = spice_type.value
+        avg_spice_stats['distribution'][spice_name] = np.mean([
+            r['spice_stats']['distribution'].get(spice_name, 0) for r in results
+        ])
     
     stats = {
         'months': months,
@@ -232,10 +299,8 @@ def calculate_stats(results, config, start_ga, total_months):
         'total_input': start_ga + np.mean([r['contrib'] for r in results]),
         'survivor_count': len([r for r in results if r['final_ga'] >= 100]),
         
-        # Spice Stats (Divided by Total Sessions for "Per Session" metric)
-        'avg_spice_sessions': np.mean([r['spice_sessions'] for r in results]),
-        'avg_zero_uses': np.mean([r['zero_uses'] for r in results]) / total_sessions_per_career,
-        'avg_tiers_uses': np.mean([r['tiers_uses'] for r in results]) / total_sessions_per_career
+        # Spice v5.0 comprehensive statistics
+        'spice_stats': avg_spice_stats
     }
     return stats
 
@@ -399,11 +464,17 @@ def show_roulette_sim():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
-                # SPICE - FIXED TO 1 SPIN COOLDOWN
-                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
-                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
-                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
-                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
+                # SPICE v5.0 - Map old UI controls to Zéro Léger (for backward compat)
+                spice_zero_leger_enabled=switch_spice_zero.value,
+                spice_zero_leger_trigger=slider_spice_zero_trig.value,
+                spice_zero_leger_max=slider_spice_zero_max.value,
+                spice_zero_leger_cooldown=slider_spice_zero_cool.value,
+                
+                # Tiers mapped as well
+                spice_tiers_enabled=switch_spice_tiers.value,
+                spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value,
+                spice_tiers_cooldown=slider_spice_tiers_cool.value
             )
             
             res = await asyncio.to_thread(RouletteWorker.run_full_career, 
@@ -456,11 +527,17 @@ def show_roulette_sim():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
-                # SPICE - FIXED TO 1 SPIN COOLDOWN
-                spice_zero_enabled=switch_spice_zero.value, spice_zero_trigger=slider_spice_zero_trig.value,
-                spice_zero_max=slider_spice_zero_max.value, spice_zero_cooldown=slider_spice_zero_cool.value,
-                spice_tiers_enabled=switch_spice_tiers.value, spice_tiers_trigger=slider_spice_tiers_trig.value,
-                spice_tiers_max=slider_spice_tiers_max.value, spice_tiers_cooldown=slider_spice_tiers_cool.value
+                # SPICE v5.0 - Map old UI controls to Zéro Léger (for backward compat)
+                spice_zero_leger_enabled=switch_spice_zero.value,
+                spice_zero_leger_trigger=slider_spice_zero_trig.value,
+                spice_zero_leger_max=slider_spice_zero_max.value,
+                spice_zero_leger_cooldown=slider_spice_zero_cool.value,
+                
+                # Tiers mapped as well
+                spice_tiers_enabled=switch_spice_tiers.value,
+                spice_tiers_trigger=slider_spice_tiers_trig.value,
+                spice_tiers_max=slider_spice_tiers_max.value,
+                spice_tiers_cooldown=slider_spice_tiers_cool.value
             )
 
             start_ga = config['start_ga']
@@ -613,11 +690,23 @@ def show_roulette_sim():
                 lines.append(f"Active Play Time: {active_pct:.1f}%")
                 lines.append(f"Strategy Grade: {grade} ({total_score:.1f}%)")
                 
-                lines.append(f"\n=== SPICE BET STATS ===")
-                lines.append(f"Spice Zéro: {overrides.spice_zero_enabled} (Trig {overrides.spice_zero_trigger}u, Max {overrides.spice_zero_max}, Cool {overrides.spice_zero_cooldown})")
-                lines.append(f"Spice Tiers: {overrides.spice_tiers_enabled} (Trig {overrides.spice_tiers_trigger}u, Max {overrides.spice_tiers_max}, Cool {overrides.spice_tiers_cooldown})")
-                lines.append(f"Avg Zero Léger Uses: {stats['avg_zero_uses']:.1f} per session")
-                lines.append(f"Avg Tiers Uses: {stats['avg_tiers_uses']:.1f} per session")
+                # === SPICE v5.0 COMPREHENSIVE STATS ===
+                lines.append(f"\n=== SPICE BET STATS v5.0 ===")
+                spice_stats = stats.get('spice_stats', {})
+                lines.append(f"Total Spices Fired: {spice_stats.get('total_spices_used', 0):.1f} (avg per career)")
+                lines.append(f"Sessions with Spices: {spice_stats.get('sessions_with_spices', 0):.1f}")
+                lines.append(f"Spice Wins: {spice_stats.get('spice_wins', 0):.1f} | Losses: {spice_stats.get('spice_losses', 0):.1f}")
+                lines.append(f"Spice Hit Rate: {spice_stats.get('hit_rate', 0)*100:.1f}%")
+                lines.append(f"Total Spice Cost: €{spice_stats.get('total_cost', 0):,.0f}")
+                lines.append(f"Total Spice Payout: €{spice_stats.get('total_payout', 0):,.0f}")
+                lines.append(f"Net Spice P/L: €{spice_stats.get('net_pl', 0):,.0f}")
+                lines.append(f"Momentum TP Gains: €{spice_stats.get('momentum_tp_gains', 0):,.0f}")
+                
+                lines.append(f"\nSpice Distribution (avg per career):")
+                dist = spice_stats.get('distribution', {})
+                for spice_name, count in dist.items():
+                    if count > 0:
+                        lines.append(f"  {spice_name}: {count:.2f}")
                 
                 y1_log = all_results[0].get('y1_log', [])
                 if y1_log:
