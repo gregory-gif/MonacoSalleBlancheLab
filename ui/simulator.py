@@ -294,8 +294,7 @@ def show_simulator():
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                spice_zero_enabled=False, spice_tiers_enabled=False
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
             )
             
             res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
@@ -349,8 +348,7 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                spice_zero_enabled=False, spice_tiers_enabled=False
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
             )
 
             start_ga = config['start_ga']
