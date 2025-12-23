@@ -716,7 +716,9 @@ def show_roulette_sim():
                     for e in y1_log:
                         lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
 
-                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+                # FIX: Pre-calculate string
+                log_content = "\n".join(lines)
+                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
             except Exception as e:
                 ui.label(f"Error generating report: {str(e)}").classes('text-red-500')
 
@@ -827,7 +829,8 @@ def show_roulette_sim():
             with ui.row().classes('w-full items-center justify-between'):
                 with ui.column():
                      ui.label('Starting Capital').classes('text-xs text-green-400')
-                     slider_start_ga = ui.slider(min=0, max=10000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
+                     # UPDATED RANGE: 0 to 100,000 to match Baccarat
+                     slider_start_ga = ui.slider(min=0, max=100000, value=2000, step=100).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'€{v}')
                      with ui.row().classes('gap-4 mt-2'): select_status = ui.select(list(SBM_TIERS.keys()), value='Gold').props('dense'); slider_earn_rate = ui.slider(min=1, max=20, value=10).props('color=yellow').classes('w-32')
                 btn_sim = ui.button('RUN SIM', on_click=run_sim).props('icon=play_arrow color=yellow text-color=black size=lg')
 
