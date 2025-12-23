@@ -474,7 +474,7 @@ def show_simulator():
                 for e in y1_log:
                     lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
             
-            # --- FIX IS HERE: Create the string BEFORE passing it to f-string ---
+            # --- FINAL FIX: Create the string BEFORE passing it to f-string ---
             log_content = "\n".join(lines)
             ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
 
@@ -576,4 +576,3 @@ def show_simulator():
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
-        
