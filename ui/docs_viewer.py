@@ -19,14 +19,18 @@ def show_docs_viewer():
     def load_doc(filepath):
         """Load and display markdown file"""
         try:
-            full_path = f'/workspaces/MonacoSalleBlancheLab/{filepath}'
+            # Get the project root directory (parent of ui folder)
+            ui_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(ui_dir)
+            full_path = os.path.join(project_root, filepath)
+            
             if os.path.exists(full_path):
                 with open(full_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                     markdown_content.content = content
                     ui.notify(f'Loaded: {filepath}', type='positive')
             else:
-                markdown_content.content = f'**File not found:** {filepath}'
+                markdown_content.content = f'**File not found:** {filepath}\n\nSearched in: `{full_path}`'
                 ui.notify(f'File not found: {filepath}', type='warning')
         except Exception as e:
             markdown_content.content = f'**Error loading file:** {str(e)}'

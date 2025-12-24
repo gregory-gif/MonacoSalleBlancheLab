@@ -100,12 +100,12 @@ class CareerManager:
             for _ in range(sessions_this_month):
                 if game_type == 'Roulette':
                     # --- ROULETTE ENGINE ---
-                    pnl, vol, used_lvl, hands, z, t = RouletteWorker.run_session(
+                    pnl, vol, used_lvl, hands, exit_reason, press_streak = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE (Updated Call) ---
-                    pnl, vol, used_lvl, hands = BaccaratWorker.run_session(
+                    # --- BACCARAT ENGINE ---
+                    pnl, vol, used_lvl, hands, exit_reason, press_streak = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 
@@ -155,15 +155,12 @@ class CareerManager:
             bet_strategy=bet_strat_obj,
             penalty_box_enabled=config.get('tac_penalty', True),
             
-            # Spice Configs (Safe Defaults)
-            spice_zero_enabled=config.get('spice_zero_en', False),
-            spice_zero_trigger=config.get('spice_zero_trig', 15),
-            spice_zero_max=config.get('spice_zero_max', 100),
-            spice_zero_cooldown=config.get('spice_zero_cool', 10),
-            spice_tiers_enabled=config.get('spice_tiers_en', False),
-            spice_tiers_trigger=config.get('spice_tiers_trig', 25),
-            spice_tiers_max=config.get('spice_tiers_max', 100),
-            spice_tiers_cooldown=config.get('spice_tiers_cool', 10)
+            # SPICE v5.0 Configs - Use defaults (all disabled) for career mode
+            # Individual spice types can be configured in the UI if needed
+            spice_global_max_per_session=config.get('spice_global_max_session', 3),
+            spice_global_max_per_spin=config.get('spice_global_max_spin', 1),
+            spice_disable_if_caroline_step4=config.get('spice_disable_caroline', True),
+            spice_disable_if_pl_below_zero=config.get('spice_disable_below_zero', True)
         )
         use_ratchet = config.get('risk_ratch', False)
         penalty_mode = config.get('tac_penalty', True)
