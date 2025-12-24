@@ -58,6 +58,9 @@ class RouletteWorker:
         spins_limit = overrides.shoes_per_session * 60 
         volume = 0
         
+        # Smart Trailing Stop tracking
+        session_peak_profit = 0.0
+        
         # Initialize dynamic TP (can be boosted by spice wins during session)
         original_tp_units = session_overrides.profit_lock_units
         state.dynamic_tp_eur = original_tp_units * base_bet if original_tp_units > 0 else 0
@@ -121,26 +124,51 @@ class RouletteWorker:
                 if spice_won and state.dynamic_tp_eur > 0:
                     state.dynamic_tp_eur = spice_engine.apply_momentum_tp_boost(fired_spice_type, state.dynamic_tp_eur, base_bet)
             
+            # === SMART TRAILING STOP LOGIC ===
+            current_profit = state.session_pnl
+            
+            # Update peak profit
+            if current_profit > session_peak_profit:
+                session_peak_profit = current_profit
+            
+            # Smart Exit Window Check (after smart_window_start spins)
+            if (session_overrides.smart_exit_enabled and 
+                state.current_spin >= session_overrides.smart_window_start):
+                
+                min_lock_threshold = session_overrides.min_profit_to_lock * base_bet
+                
+                # Only activate if we have meaningful profit
+                if current_profit >= min_lock_threshold:
+                    # Calculate dynamic floor (trailing stop trigger)
+                    dynamic_floor = session_peak_profit * (1.0 - session_overrides.trailing_drop_pct)
+                    
+                    # Exit if profit has dropped below the trailing stop
+                    if current_profit <= dynamic_floor:
+                        state.mode = 'STOPPED'
+                        exit_reason = 'SMART_TRAILING'
+                        break
+            
             state.current_spin += 1
 
         # Get comprehensive spice statistics
         spice_stats = spice_engine.get_statistics()
         
-        # Determine exit reason
-        exit_reason = 'TIME_LIMIT'
-        if state.mode == 'STOPPED':
-            if state.session_pnl <= -(session_overrides.stop_loss_units * base_bet):
-                exit_reason = 'STOP_LOSS'
-            elif state.session_pnl >= (session_overrides.profit_lock_units * base_bet):
-                exit_reason = 'TARGET'
-            elif state.session_pnl <= state.locked_profit:
-                exit_reason = 'RATCHET'
+        # Determine exit reason (check if already set by Smart Trailing)
+        if 'exit_reason' not in locals():
+            exit_reason = 'TIME_LIMIT'
+            if state.mode == 'STOPPED':
+                if state.session_pnl <= -(session_overrides.stop_loss_units * base_bet):
+                    exit_reason = 'STOP_LOSS'
+                elif state.session_pnl >= (session_overrides.profit_lock_units * base_bet):
+                    exit_reason = 'TARGET'
+                elif state.session_pnl <= state.locked_profit:
+                    exit_reason = 'RATCHET'
         
         # Calculate peak progression levels
         max_caroline = state.caroline_level
         max_dalembert = state.dalembert_level
         
-        # Return session results + spice stats + detailed tracking
+        # Return session results + spice stats + detailed tracking + peak profit
         return (
             state.session_pnl, 
             volume, 
@@ -150,7 +178,8 @@ class RouletteWorker:
             exit_reason,
             max_caroline,
             max_dalembert,
-            state.current_press_streak
+            state.current_press_streak,
+            session_peak_profit
         )
 
     @staticmethod
@@ -221,7 +250,7 @@ class RouletteWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, spins, spice_stats, exit_reason, max_caroline, max_dalembert, final_streak = RouletteWorker.run_session(
+                    pnl, vol, used_level, spins, spice_stats, exit_reason, max_caroline, max_dalembert, final_streak, peak_profit = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -267,7 +296,8 @@ class RouletteWorker:
                             'tp_boosts': tp_boosts,
                             'caroline_max': max_caroline,
                             'dalembert_max': max_dalembert,
-                            'streak_max': final_streak
+                            'streak_max': final_streak,
+                            'peak_profit': peak_profit
                         })
             else:
                  if track_y1_details and m < 12:
@@ -286,7 +316,8 @@ class RouletteWorker:
                             'tp_boosts': 0,
                             'caroline_max': 0,
                             'dalembert_max': 0,
-                            'streak_max': 0
+                            'streak_max': 0,
+                            'peak_profit': 0
                         })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
@@ -398,6 +429,10 @@ def show_roulette_sim():
                 'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
                 'tac_base_bet': slider_base_bet.value,
                 
+                # Smart Trailing Stop
+                'smart_exit_en': switch_smart_exit.value, 'smart_window': slider_smart_window.value,
+                'smart_min_lock': slider_min_lock.value, 'smart_trail_pct': slider_trail_pct.value,
+                
                 # SPICE FIELDS
                 'spice_zero_en': switch_spice_zero.value, 'spice_zero_trig': slider_spice_zero_trig.value,
                 'spice_zero_max': slider_spice_zero_max.value, 'spice_zero_cool': slider_spice_zero_cool.value,
@@ -452,6 +487,12 @@ def show_roulette_sim():
             slider_earn_rate.value = config.get('gold_earn', 10)
             slider_start_ga.value = config.get('start_ga', 2000)
             slider_base_bet.value = config.get('tac_base_bet', 5.0)
+            
+            # Smart Trailing Stop LOADS
+            switch_smart_exit.value = config.get('smart_exit_en', True)
+            slider_smart_window.value = config.get('smart_window', 90)
+            slider_min_lock.value = config.get('smart_min_lock', 20)
+            slider_trail_pct.value = config.get('smart_trail_pct', 0.20)
             
             # SPICE LOADS
             switch_spice_zero.value = config.get('spice_zero_en', False)
@@ -521,6 +562,12 @@ def show_roulette_sim():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
+                # Smart Trailing Stop
+                smart_exit_enabled=switch_smart_exit.value,
+                smart_window_start=int(slider_smart_window.value),
+                min_profit_to_lock=int(slider_min_lock.value),
+                trailing_drop_pct=float(slider_trail_pct.value),
+                
                 # SPICE v5.0 - Map old UI controls to Zéro Léger (for backward compat)
                 spice_zero_leger_enabled=switch_spice_zero.value,
                 spice_zero_leger_trigger=slider_spice_zero_trig.value,
@@ -583,6 +630,12 @@ def show_roulette_sim():
                 bet_strategy_2=select_bet_strat_2.value,
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                
+                # Smart Trailing Stop
+                smart_exit_enabled=switch_smart_exit.value,
+                smart_window_start=int(slider_smart_window.value),
+                min_profit_to_lock=int(slider_min_lock.value),
+                trailing_drop_pct=float(slider_trail_pct.value),
                 
                 # === SPICE SYSTEM v5.0 - COMPLETE CONFIGURATION ===
                 # Global Constraints
@@ -783,6 +836,7 @@ def show_roulette_sim():
                 lines.append(f"Base Bet: €{config['base_bet']} | Spins/Sess: {overrides.shoes_per_session * 60}")
                 lines.append(f"Press Logic: {press_name} | Safety: {config['safety']}x | Iron Gate: {overrides.iron_gate_limit}")
                 lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+                lines.append(f"Smart Trailing Stop: {overrides.smart_exit_enabled} (Window: Spin {overrides.smart_window_start}, Min Lock: {overrides.min_profit_to_lock}u, Drop: {overrides.trailing_drop_pct*100:.0f}%)")
                 lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
                 lines.append(f"Gold Probability: {gold_prob:.1f}%")
                 
@@ -816,10 +870,10 @@ def show_roulette_sim():
                 y1_log = all_results[0].get('y1_log', [])
                 if y1_log:
                     lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
-                    lines.append("Month,Session,Result,Total_Bal,Game_Bal,Spins,Volume,Tier,Exit_Reason,Spice_Count,Spice_PL,TP_Boosts,Caroline_Max,DAlembert_Max,Streak_Max")
+                    lines.append("Month,Session,Result,Peak_Profit,Total_Bal,Game_Bal,Spins,Volume,Tier,Exit_Reason,Spice_Count,Spice_PL,TP_Boosts,Caroline_Max,DAlembert_Max,Streak_Max")
                     for e in y1_log:
                         lines.append(
-                            f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
+                            f"{e['month']},{e['session']},{e['result']:.0f},{e.get('peak_profit', 0):.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
                             f"{e['spins']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['spice_cnt']},"
                             f"{e['spice_pl']:.0f},{e['tp_boosts']},{e['caroline_max']},{e['dalembert_max']},{e['streak_max']}"
                         )
@@ -1042,6 +1096,29 @@ def show_roulette_sim():
                     
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=3, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
+                    
+                    # Smart Trailing Stop Controls
+                    ui.separator().classes('bg-slate-700 my-2')
+                    ui.label('🎯 SMART TRAILING STOP (90-120 spins)').classes('text-xs text-yellow-400 font-bold')
+                    switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
+                    switch_smart_exit.value = True
+                    with ui.row().classes('w-full justify-between items-center'): 
+                        ui.label('Start Window').classes('text-xs text-slate-400')
+                        lbl_smart_window = ui.label()
+                    slider_smart_window = ui.slider(min=60, max=110, value=90, step=5).props('color=yellow')
+                    lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Spin {int(v)}')
+                    with ui.row().classes('w-full justify-between items-center'): 
+                        ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
+                        lbl_min_lock = ui.label()
+                    slider_min_lock = ui.slider(min=5, max=50, value=20, step=5).props('color=yellow')
+                    lbl_min_lock.bind_text_from(slider_min_lock, 'value', lambda v: f'+{int(v)}u')
+                    with ui.row().classes('w-full justify-between items-center'): 
+                        ui.label('Trailing Drop %').classes('text-xs text-slate-400')
+                        lbl_trail_pct = ui.label()
+                    slider_trail_pct = ui.slider(min=0.10, max=0.40, value=0.20, step=0.05).props('color=yellow')
+                    lbl_trail_pct.bind_text_from(slider_trail_pct, 'value', lambda v: f'{int(v*100)}%')
+                    ui.separator().classes('bg-slate-700 my-2')
+                    
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     

@@ -32,6 +32,12 @@ class StrategyOverrides:
     shoes_per_session: int = 3
     penalty_box_enabled: bool = True
     
+    # --- SMART TRAILING STOP ---
+    smart_exit_enabled: bool = True
+    smart_window_start: int = 90
+    min_profit_to_lock: int = 20
+    trailing_drop_pct: float = 0.20
+    
     # --- SPICE BETS CONFIGURATION v5.0 (7 Spice Types) ---
     # Global Spice Controls
     spice_global_max_per_session: int = 3
