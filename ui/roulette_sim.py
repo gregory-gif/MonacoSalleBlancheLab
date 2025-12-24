@@ -127,13 +127,31 @@ class RouletteWorker:
         # Get comprehensive spice statistics
         spice_stats = spice_engine.get_statistics()
         
-        # Return session results + spice stats
+        # Determine exit reason
+        exit_reason = 'TIME_LIMIT'
+        if state.mode == 'STOPPED':
+            if state.session_pnl <= -(session_overrides.stop_loss_units * base_bet):
+                exit_reason = 'STOP_LOSS'
+            elif state.session_pnl >= (session_overrides.profit_lock_units * base_bet):
+                exit_reason = 'TARGET'
+            elif state.session_pnl <= state.locked_profit:
+                exit_reason = 'RATCHET'
+        
+        # Calculate peak progression levels
+        max_caroline = state.caroline_level
+        max_dalembert = state.dalembert_level
+        
+        # Return session results + spice stats + detailed tracking
         return (
             state.session_pnl, 
             volume, 
             tier.level, 
             state.current_spin, 
-            spice_stats
+            spice_stats,
+            exit_reason,
+            max_caroline,
+            max_dalembert,
+            state.current_press_streak
         )
 
     @staticmethod
@@ -172,6 +190,9 @@ class RouletteWorker:
             'distribution': {st.value: 0 for st in SpiceType},
             'sessions_with_spices': 0
         }
+        
+        # Enhanced Y1 tracking
+        y1_session_counter = 0
 
         for m in range(total_months):
             if m > 0 and m % 12 == 0:
@@ -201,7 +222,7 @@ class RouletteWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, spins, spice_stats = RouletteWorker.run_session(
+                    pnl, vol, used_level, spins, spice_stats, exit_reason, max_caroline, max_dalembert, final_streak = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -226,11 +247,48 @@ class RouletteWorker:
                     if spice_stats['total_spices_used'] > 0:
                         all_spice_stats['sessions_with_spices'] += 1
                     
+                    # Enhanced Year 1 tracking with comprehensive data
                     if track_y1_details and m < 12:
-                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': spins})
+                        y1_session_counter += 1
+                        spice_net = spice_stats['total_payout'] - spice_stats['total_cost']
+                        tp_boosts = int(spice_stats['momentum_tp_gains'] / (20 * base_bet_val)) if spice_stats['momentum_tp_gains'] > 0 else 0
+                        
+                        y1_log.append({
+                            'month': m + 1,
+                            'session': y1_session_counter,
+                            'result': pnl,
+                            'balance': current_ga,
+                            'game_bal': start_ga + running_play_pnl,
+                            'spins': spins,
+                            'volume': vol,
+                            'tier': used_level,
+                            'exit': exit_reason,
+                            'spice_cnt': spice_stats['total_spices_used'],
+                            'spice_pl': spice_net,
+                            'tp_boosts': tp_boosts,
+                            'caroline_max': max_caroline,
+                            'dalembert_max': max_dalembert,
+                            'streak_max': final_streak
+                        })
             else:
                  if track_y1_details and m < 12:
-                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
+                        y1_log.append({
+                            'month': m + 1, 
+                            'session': 0,
+                            'result': 0, 
+                            'balance': current_ga, 
+                            'game_bal': start_ga + running_play_pnl, 
+                            'spins': 0,
+                            'volume': 0,
+                            'tier': 0,
+                            'exit': 'INSOLVENT',
+                            'spice_cnt': 0,
+                            'spice_pl': 0,
+                            'tp_boosts': 0,
+                            'caroline_max': 0,
+                            'dalembert_max': 0,
+                            'streak_max': 0
+                        })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
@@ -758,10 +816,14 @@ def show_roulette_sim():
                 
                 y1_log = all_results[0].get('y1_log', [])
                 if y1_log:
-                    lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
-                    lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
+                    lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
+                    lines.append("Month,Session,Result,Total_Bal,Game_Bal,Spins,Volume,Tier,Exit_Reason,Spice_Count,Spice_PL,TP_Boosts,Caroline_Max,DAlembert_Max,Streak_Max")
                     for e in y1_log:
-                        lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+                        lines.append(
+                            f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
+                            f"{e['spins']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['spice_cnt']},"
+                            f"{e['spice_pl']:.0f},{e['tp_boosts']},{e['caroline_max']},{e['dalembert_max']},{e['streak_max']}"
+                        )
 
                 # FIX: Pre-calculate string
                 log_content = "\n".join(lines)

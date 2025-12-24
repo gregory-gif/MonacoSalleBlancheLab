@@ -62,7 +62,19 @@ class BaccaratWorker:
                 state.current_shoe += 1
                 state.hands_played_in_shoe = 0
 
-        return state.session_pnl, volume, tier.level, state.hands_played_total
+        # Determine exit reason
+        exit_reason = 'TIME_LIMIT'
+        if state.mode.name == 'STOPPED':
+            stop_val = -(overrides.stop_loss_units * tier.base_unit)
+            target_val = overrides.profit_lock_units * tier.base_unit
+            if state.session_pnl <= stop_val:
+                exit_reason = 'STOP_LOSS'
+            elif state.session_pnl >= target_val:
+                exit_reason = 'TARGET'
+            elif state.session_pnl <= state.locked_profit:
+                exit_reason = 'RATCHET'
+
+        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -87,6 +99,7 @@ class BaccaratWorker:
         
         y1_log = []
         last_session_won = False
+        y1_session_counter = 0
 
         for m in range(total_months):
             if m > 0 and m % 12 == 0: current_year_points = 0
@@ -115,7 +128,7 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands = BaccaratWorker.run_session(
+                    pnl, vol, used_level, hands, exit_reason, final_streak = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -126,10 +139,33 @@ class BaccaratWorker:
                     last_session_won = (pnl > 0)
                     
                     if track_y1_details and m < 12:
-                        y1_log.append({'month': m + 1, 'result': pnl, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': hands})
+                        y1_session_counter += 1
+                        y1_log.append({
+                            'month': m + 1,
+                            'session': y1_session_counter,
+                            'result': pnl,
+                            'balance': current_ga,
+                            'game_bal': start_ga + running_play_pnl,
+                            'hands': hands,
+                            'volume': vol,
+                            'tier': used_level,
+                            'exit': exit_reason,
+                            'streak_max': final_streak
+                        })
             else:
                  if track_y1_details and m < 12:
-                        y1_log.append({'month': m + 1, 'result': 0, 'balance': current_ga, 'game_bal': start_ga + running_play_pnl, 'hands': 0, 'note': 'Insolvent'})
+                        y1_log.append({
+                            'month': m + 1,
+                            'session': 0,
+                            'result': 0,
+                            'balance': current_ga,
+                            'game_bal': start_ga + running_play_pnl,
+                            'hands': 0,
+                            'volume': 0,
+                            'tier': 0,
+                            'exit': 'INSOLVENT',
+                            'streak_max': 0
+                        })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
@@ -467,10 +503,13 @@ def show_simulator():
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             
             if y1_log:
-                lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
-                lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
+                lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
+                lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max")
                 for e in y1_log:
-                    lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
+                    lines.append(
+                        f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
+                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']}"
+                    )
             
             # SAFE STRING FORMATTING FOR REPORT
             log_content = "\n".join(lines)
