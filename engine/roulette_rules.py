@@ -49,6 +49,9 @@ class RouletteSessionState:
     # Spice Engine v5.0
     spice_engine: any = None  # Will hold SpiceEngine instance
     
+    # Dynamic TP (can be boosted by spice momentum)
+    dynamic_tp_eur: float = 0.0  # Session-local target profit in EUR
+    
     mode: str = 'PLAYING' 
 
 class RouletteStrategist:
@@ -64,10 +67,10 @@ class RouletteStrategist:
         if state.session_pnl <= stop_limit:
             return {'mode': 'STOPPED', 'bet': 0, 'reason': 'STOP LOSS'}
 
-        if state.overrides.profit_lock_units > 0:
-            target = state.overrides.profit_lock_units * base_val
-            if state.session_pnl >= target:
-                return {'mode': 'STOPPED', 'bet': 0, 'reason': 'TARGET HIT'}
+        # Check dynamic TP (can be boosted by spice momentum) OR fallback to override setting
+        target_check = state.dynamic_tp_eur if state.dynamic_tp_eur > 0 else (state.overrides.profit_lock_units * base_val if state.overrides.profit_lock_units > 0 else 0)
+        if target_check > 0 and state.session_pnl >= target_check:
+            return {'mode': 'STOPPED', 'bet': 0, 'reason': 'TARGET HIT'}
 
         if state.overrides.ratchet_enabled:
             if state.session_pnl <= state.locked_profit and state.locked_profit > -9999:

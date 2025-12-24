@@ -58,8 +58,9 @@ class RouletteWorker:
         spins_limit = overrides.shoes_per_session * 60 
         volume = 0
         
-        # Track TP for momentum adjustments
-        current_tp = session_overrides.profit_lock_units * base_bet if session_overrides.profit_lock_units > 0 else 999999
+        # Initialize dynamic TP (can be boosted by spice wins during session)
+        original_tp_units = session_overrides.profit_lock_units
+        state.dynamic_tp_eur = original_tp_units * base_bet if original_tp_units > 0 else 0
         
         active_main_bets = []
         b1 = BET_MAP.get(overrides.bet_strategy, RouletteBet.RED)
@@ -116,11 +117,9 @@ class RouletteWorker:
                 spice_pnl, spice_won = spice_engine.resolve_spice(fired_spice_type, number, base_bet)
                 state.session_pnl += spice_pnl
                 
-                # MOMENTUM TP BOOST on spice win
-                if spice_won and session_overrides.profit_lock_units > 0:
-                    current_tp = spice_engine.apply_momentum_tp_boost(fired_spice_type, current_tp, base_bet)
-                    # Update the session override dynamically
-                    session_overrides.profit_lock_units = int(current_tp / base_bet)
+                # MOMENTUM TP BOOST on spice win (updates state.dynamic_tp_eur only!)
+                if spice_won and state.dynamic_tp_eur > 0:
+                    state.dynamic_tp_eur = spice_engine.apply_momentum_tp_boost(fired_spice_type, state.dynamic_tp_eur, base_bet)
             
             state.current_spin += 1
 
