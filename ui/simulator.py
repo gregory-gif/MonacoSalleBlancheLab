@@ -474,7 +474,8 @@ def show_simulator():
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
                 for e in y1_log:
                     lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
-            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+            lines_text = "\n".join(lines)
+            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{lines_text}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):

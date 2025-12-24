@@ -232,122 +232,153 @@ def show_career_mode():
             print(traceback.format_exc())
 
     async def run_simulation():
-        if not legs:
-            ui.notify('Add at least one Strategy Leg!', type='negative')
-            return
-            
-        progress.set_visibility(True)
-        results_area.clear()
-        
-        profile = load_profile()
-        saved_strats = profile.get('saved_strategies', {})
-        sequence_config = []
-        for leg in legs:
-            cfg = saved_strats.get(leg['strategy'])
-            if not cfg:
-                ui.notify(f"Strategy {leg['strategy']} not found!", type='negative')
+        try:
+            if not legs:
+                ui.notify('Add at least one Strategy Leg!', type='negative')
                 return
-            sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
-            
-        start_ga = slider_start_ga.value
-        years = slider_years.value
-        sessions = slider_freq.value
-        num_sims = slider_num_sims.value 
-        
-        def run_batch():
-            batch_results = []
-            for _ in range(num_sims):
-                traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
-                net_cost = total_in - final_ga
-                monthly_cost = net_cost / (years * 12)
-                
-                batch_results.append({
-                    'trajectory': traj, 
-                    'log': log, 
-                    'final': final_ga,
-                    'monthly_cost': monthly_cost
-                })
-            return batch_results
 
-        results = await asyncio.to_thread(run_batch)
-        
-        trajectories = np.array([r['trajectory'] for r in results])
-        months = list(range(trajectories.shape[1]))
-        
-        min_band = np.min(trajectories, axis=0)
-        max_band = np.max(trajectories, axis=0)
-        p25_band = np.percentile(trajectories, 25, axis=0)
-        p75_band = np.percentile(trajectories, 75, axis=0)
-        mean_line = np.mean(trajectories, axis=0)
-        median_line = np.median(trajectories, axis=0)
-        
-        survivors = len([r for r in results if r['final'] > 100])
-        survival_rate = (survivors / num_sims) * 100
-        
-        costs = [r['monthly_cost'] for r in results]
-        avg_cost = np.mean(costs)
-        med_cost = np.median(costs)
-        
-        progress.set_visibility(False)
-        with results_area:
-            
-            with ui.row().classes('w-full justify-between mb-4'):
-                with ui.card().classes('bg-slate-800 p-2'):
-                    ui.label('SURVIVAL RATE').classes('text-xs text-slate-400')
-                    color = "text-green-400" if survival_rate > 90 else "text-red-400"
-                    ui.label(f"{survival_rate:.1f}%").classes(f'text-2xl font-black {color}')
-                
-                with ui.card().classes('bg-slate-800 p-2'):
-                    ui.label('MEDIAN MONTHLY COST').classes('text-xs text-slate-400')
-                    val_str = f"€{med_cost:,.0f}" if med_cost > 0 else f"+€{abs(med_cost):,.0f}"
-                    col_str = "text-red-400" if med_cost > 0 else "text-green-400"
-                    ui.label(val_str).classes(f'text-2xl font-black {col_str}')
-                
-                with ui.card().classes('bg-slate-800 p-2'):
-                    ui.label('AVG MONTHLY COST').classes('text-xs text-slate-400')
-                    val_str = f"€{avg_cost:,.0f}" if avg_cost > 0 else f"+€{abs(avg_cost):,.0f}"
-                    col_str = "text-red-400" if avg_cost > 0 else "text-green-400"
-                    ui.label(val_str).classes(f'text-2xl font-black {col_str}')
+            progress.set_visibility(True)
+            results_area.clear()
 
-            ui.label('THE MULTIVERSE (Probabilities)').classes('text-sm font-bold text-slate-400 mt-2')
-            fig_multi = go.Figure()
-            fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Range'))
-            fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(74, 222, 128, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
-            fig_multi.add_trace(go.Scatter(x=months, y=median_line, mode='lines', name='Median', line=dict(color='yellow', width=2)))
-            
-            for leg in legs[:-1]:
-                fig_multi.add_hline(y=leg['target'], line_dash="dash", line_color="white", opacity=0.3)
-                
-            fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
-            ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
+            profile = load_profile()
+            saved_strats = profile.get('saved_strategies', {})
+            sequence_config = []
+            for leg in legs:
+                cfg = saved_strats.get(leg['strategy'])
+                if not cfg:
+                    ui.notify(f"Strategy {leg['strategy']} not found!", type='negative')
+                    return
+                sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
 
-            ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
-            
-            sim1_traj = results[0]['trajectory']
-            sim1_log = results[0]['log']
-            sim1_final = results[0]['final']
-            
-            chart_single_container.clear()
-            with chart_single_container:
-                res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
-                ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
-                
-                fig_single = go.Figure()
-                fig_single.add_trace(go.Scatter(y=sim1_traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
-                
+            start_ga = slider_start_ga.value
+            years = slider_years.value
+            sessions = slider_freq.value
+            num_sims = slider_num_sims.value
+
+
+            async def run_batch_with_progress():
+                batch_results = []
+                for i in range(num_sims):
+                    try:
+                        traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
+                        net_cost = total_in - final_ga
+                        monthly_cost = net_cost / (years * 12)
+                        batch_results.append({
+                            'trajectory': traj,
+                            'log': log,
+                            'final': final_ga,
+                            'monthly_cost': monthly_cost
+                        })
+                    except Exception as e:
+                        print(f"Simulation error: {e}")
+                        import traceback; traceback.print_exc()
+                        batch_results.append({
+                            'trajectory': [],
+                            'log': [
+                                {'month': 0, 'event': 'ERROR', 'details': str(e)}
+                            ],
+                            'final': 0,
+                            'monthly_cost': 0
+                        })
+                    # Update progress bar (simulate progress)
+                    progress.value = (i + 1) / num_sims
+                    await asyncio.sleep(0)  # Yield to event loop for UI update
+                return batch_results
+
+            # Set progress bar to determinate mode
+            progress.props('color=purple')
+            progress.value = 0
+            progress.set_visibility(True)
+            results = await run_batch_with_progress()
+            progress.set_visibility(False)
+
+            # Filter out failed runs
+            valid_results = [r for r in results if r['trajectory']]
+            if not valid_results:
+                ui.notify('All simulations failed. Check logs for details.', type='negative')
+                return
+
+            trajectories = np.array([r['trajectory'] for r in valid_results])
+            months = list(range(trajectories.shape[1]))
+
+            min_band = np.min(trajectories, axis=0)
+            max_band = np.max(trajectories, axis=0)
+            p25_band = np.percentile(trajectories, 25, axis=0)
+            p75_band = np.percentile(trajectories, 75, axis=0)
+            mean_line = np.mean(trajectories, axis=0)
+            median_line = np.median(trajectories, axis=0)
+
+            survivors = len([r for r in valid_results if r['final'] > 100])
+            survival_rate = (survivors / len(valid_results)) * 100
+
+            costs = [r['monthly_cost'] for r in valid_results]
+            avg_cost = np.mean(costs)
+            med_cost = np.median(costs)
+
+            with results_area:
+                with ui.row().classes('w-full justify-between mb-4'):
+                    with ui.card().classes('bg-slate-800 p-2'):
+                        ui.label('SURVIVAL RATE').classes('text-xs text-slate-400')
+                        color = "text-green-400" if survival_rate > 90 else "text-red-400"
+                        ui.label(f"{survival_rate:.1f}%").classes(f'text-2xl font-black {color}')
+
+                    with ui.card().classes('bg-slate-800 p-2'):
+                        ui.label('MEDIAN MONTHLY COST').classes('text-xs text-slate-400')
+                        val_str = f"€{med_cost:,.0f}" if med_cost > 0 else f"+€{abs(med_cost):,.0f}"
+                        col_str = "text-red-400" if med_cost > 0 else "text-green-400"
+                        ui.label(val_str).classes(f'text-2xl font-black {col_str}')
+
+                    with ui.card().classes('bg-slate-800 p-2'):
+                        ui.label('AVG MONTHLY COST').classes('text-xs text-slate-400')
+                        val_str = f"€{avg_cost:,.0f}" if avg_cost > 0 else f"+€{abs(avg_cost):,.0f}"
+                        col_str = "text-red-400" if avg_cost > 0 else "text-green-400"
+                        ui.label(val_str).classes(f'text-2xl font-black {col_str}')
+
+                ui.label('THE MULTIVERSE (Probabilities)').classes('text-sm font-bold text-slate-400 mt-2')
+                fig_multi = go.Figure()
+                fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([max_band, min_band[::-1]]), fill='toself', fillcolor='rgba(148, 163, 184, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Range'))
+                fig_multi.add_trace(go.Scatter(x=months + months[::-1], y=np.concatenate([p75_band, p25_band[::-1]]), fill='toself', fillcolor='rgba(74, 222, 128, 0.2)', line=dict(color='rgba(255,255,255,0)'), name='Likely'))
+                fig_multi.add_trace(go.Scatter(x=months, y=median_line, mode='lines', name='Median', line=dict(color='yellow', width=2)))
+
                 for leg in legs[:-1]:
-                    fig_single.add_hline(y=leg['target'], line_dash="dash", line_color="yellow", annotation_text=f"Switch")
-                    
-                fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
-                ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
-            
-            ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
+                    fig_multi.add_hline(y=leg['target'], line_dash="dash", line_color="white", opacity=0.3)
 
-            with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
-                for l in sim1_log:
-                    color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
-                    if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
-                    ui.label(f"M{l['month']} | {l['event']}: {l['details']}").classes(f'text-xs {color}')
+                fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
+
+                ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
+
+                sim1_traj = valid_results[0]['trajectory']
+                sim1_log = valid_results[0]['log']
+                sim1_final = valid_results[0]['final']
+
+                chart_single_container.clear()
+                with chart_single_container:
+                    res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
+                    ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+
+                    fig_single = go.Figure()
+                    fig_single.add_trace(go.Scatter(y=sim1_traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+
+                    for leg in legs[:-1]:
+                        fig_single.add_hline(y=leg['target'], line_dash="dash", line_color="yellow", annotation_text=f"Switch")
+
+                    fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                    ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
+
+                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
+
+                with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
+                    for l in sim1_log:
+                        color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
+                        if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
+                        if l['event'] == 'ERROR': color = "text-red-600 font-bold"
+                        ui.label(f"M{l['month']} | {l['event']}: {l['details']}").classes(f'text-xs {color}')
+        except Exception as e:
+            ui.notify(f'Critical error: {e}', type='negative')
+            import traceback; traceback.print_exc()
+        finally:
+            progress.set_visibility(False)
 
     # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):

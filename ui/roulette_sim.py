@@ -527,17 +527,64 @@ def show_roulette_sim():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
-                # SPICE v5.0 - Map old UI controls to Zéro Léger (for backward compat)
-                spice_zero_leger_enabled=switch_spice_zero.value,
-                spice_zero_leger_trigger=slider_spice_zero_trig.value,
-                spice_zero_leger_max=slider_spice_zero_max.value,
-                spice_zero_leger_cooldown=slider_spice_zero_cool.value,
+                # === SPICE SYSTEM v5.0 - COMPLETE CONFIGURATION ===
+                # Global Constraints
+                spice_global_max_per_session=int(slider_spice_global_max_session.value),
+                spice_global_max_per_spin=int(slider_spice_global_max_spin.value),
+                spice_disable_if_caroline_step4=switch_spice_disable_caroline.value,
+                spice_disable_if_pl_below_zero=switch_spice_disable_neg_pl.value,
                 
-                # Tiers mapped as well
+                # Family A - Light Spices
+                spice_zero_leger_enabled=switch_spice_zero.value,
+                spice_zero_leger_trigger=int(slider_spice_zero_trig.value),
+                spice_zero_leger_max=int(slider_spice_zero_max.value),
+                spice_zero_leger_cooldown=int(slider_spice_zero_cool.value),
+                spice_zero_leger_min_pl=int(slider_spice_zero_min_pl.value),
+                spice_zero_leger_max_pl=int(slider_spice_zero_max_pl.value),
+                
+                spice_jeu_zero_enabled=switch_spice_jeu_zero.value,
+                spice_jeu_zero_trigger=int(slider_spice_jeu_zero_trig.value),
+                spice_jeu_zero_max=int(slider_spice_jeu_zero_max.value),
+                spice_jeu_zero_cooldown=int(slider_spice_jeu_zero_cool.value),
+                spice_jeu_zero_min_pl=int(slider_spice_jeu_zero_min_pl.value),
+                spice_jeu_zero_max_pl=int(slider_spice_jeu_zero_max_pl.value),
+                
+                spice_zero_crown_enabled=switch_spice_zero_crown.value,
+                spice_zero_crown_trigger=int(slider_spice_zero_crown_trig.value),
+                spice_zero_crown_max=int(slider_spice_zero_crown_max.value),
+                spice_zero_crown_cooldown=int(slider_spice_zero_crown_cool.value),
+                spice_zero_crown_min_pl=int(slider_spice_zero_crown_min_pl.value),
+                spice_zero_crown_max_pl=int(slider_spice_zero_crown_max_pl.value),
+                
+                # Family B - Medium Spices
                 spice_tiers_enabled=switch_spice_tiers.value,
-                spice_tiers_trigger=slider_spice_tiers_trig.value,
-                spice_tiers_max=slider_spice_tiers_max.value,
-                spice_tiers_cooldown=slider_spice_tiers_cool.value
+                spice_tiers_trigger=int(slider_spice_tiers_trig.value),
+                spice_tiers_max=int(slider_spice_tiers_max.value),
+                spice_tiers_cooldown=int(slider_spice_tiers_cool.value),
+                spice_tiers_min_pl=int(slider_spice_tiers_min_pl.value),
+                spice_tiers_max_pl=int(slider_spice_tiers_max_pl.value),
+                
+                spice_orphelins_enabled=switch_spice_orphelins.value,
+                spice_orphelins_trigger=int(slider_spice_orphelins_trig.value),
+                spice_orphelins_max=int(slider_spice_orphelins_max.value),
+                spice_orphelins_cooldown=int(slider_spice_orphelins_cool.value),
+                spice_orphelins_min_pl=int(slider_spice_orphelins_min_pl.value),
+                spice_orphelins_max_pl=int(slider_spice_orphelins_max_pl.value),
+                
+                # Family C - Prestige Spices
+                spice_orphelins_plein_enabled=switch_spice_orphelins_plein.value,
+                spice_orphelins_plein_trigger=int(slider_spice_orphelins_plein_trig.value),
+                spice_orphelins_plein_max=int(slider_spice_orphelins_plein_max.value),
+                spice_orphelins_plein_cooldown=int(slider_spice_orphelins_plein_cool.value),
+                spice_orphelins_plein_min_pl=int(slider_spice_orphelins_plein_min_pl.value),
+                spice_orphelins_plein_max_pl=int(slider_spice_orphelins_plein_max_pl.value),
+                
+                spice_voisins_enabled=switch_spice_voisins.value,
+                spice_voisins_trigger=int(slider_spice_voisins_trig.value),
+                spice_voisins_max=int(slider_spice_voisins_max.value),
+                spice_voisins_cooldown=int(slider_spice_voisins_cool.value),
+                spice_voisins_min_pl=int(slider_spice_voisins_min_pl.value),
+                spice_voisins_max_pl=int(slider_spice_voisins_max_pl.value),
             )
 
             start_ga = config['start_ga']
@@ -716,7 +763,8 @@ def show_roulette_sim():
                     for e in y1_log:
                         lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
 
-                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{"\n".join(lines)}</pre>', sanitize=False)
+                lines_text = "\n".join(lines)
+                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{lines_text}</pre>', sanitize=False)
             except Exception as e:
                 ui.label(f"Error generating report: {str(e)}").classes('text-red-500')
 
@@ -753,30 +801,148 @@ def show_roulette_sim():
 
             ui.separator().classes('bg-slate-700')
 
-            with ui.card().classes('w-full bg-slate-800 p-4 border border-pink-500 mb-4'):
-                ui.label('SPICE LAB (Dynamic Add-on Bets)').classes('font-bold text-pink-400 mb-2')
-                with ui.row().classes('w-full gap-8'):
-                    # Zéro Léger
-                    with ui.column().classes('flex-1'):
-                        with ui.row().classes('items-center'):
-                            switch_spice_zero = ui.switch('Enable Zéro Léger (3u)').props('color=pink')
-                        with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ztrig = ui.label()
-                        slider_spice_zero_trig = ui.slider(min=5, max=50, value=15).props('color=pink'); lbl_ztrig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{v}u')
-                        with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_zmax = ui.label()
-                        slider_spice_zero_max = ui.slider(min=1, max=120, value=2).props('color=pink'); lbl_zmax.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{v}/sess')
-                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_zcool = ui.label()
-                        slider_spice_zero_cool = ui.slider(min=0, max=20, value=10).props('color=pink'); lbl_zcool.bind_text_from(slider_spice_zero_cool, 'value', lambda v: f'{v} spins')
-
-                    # Tiers
-                    with ui.column().classes('flex-1'):
-                        with ui.row().classes('items-center'):
-                            switch_spice_tiers = ui.switch('Enable Tiers (6u)').props('color=purple')
-                        with ui.row().classes('w-full justify-between'): ui.label('Trigger P/L').classes('text-xs text-slate-400'); lbl_ttrig = ui.label()
-                        slider_spice_tiers_trig = ui.slider(min=5, max=50, value=25).props('color=purple'); lbl_ttrig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{v}u')
-                        with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_tmax = ui.label()
-                        slider_spice_tiers_max = ui.slider(min=1, max=120, value=1).props('color=purple'); lbl_tmax.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{v}/sess')
-                        with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_tcool = ui.label()
-                        slider_spice_tiers_cool = ui.slider(min=0, max=20, value=10).props('color=purple'); lbl_tcool.bind_text_from(slider_spice_tiers_cool, 'value', lambda v: f'{v} spins')
+            # ============================================================================
+            # SPICE SYSTEM v5.0 - PROFESSIONAL CONFIGURATION PANEL
+            # ============================================================================
+            with ui.card().classes('w-full bg-slate-800 p-4 border-2 border-pink-500 mb-4'):
+                ui.label('🌶️ SPICE SYSTEM v5.0 - SECTOR BET ENGINE').classes('font-bold text-pink-400 text-lg mb-4')
+                
+                # GLOBAL CONSTRAINTS
+                with ui.expansion('⚙️ Global Constraints', icon='settings').classes('w-full bg-slate-900 text-white mb-3').props('default-opened'):
+                    with ui.grid(columns=2).classes('w-full gap-4 p-3'):
+                        with ui.column():
+                            ui.label('Max Total Spices/Session').classes('text-xs text-slate-300')
+                            slider_spice_global_max_session = ui.slider(min=0, max=10, value=3, step=1).props('color=pink')
+                            ui.label().bind_text_from(slider_spice_global_max_session, 'value', lambda v: f'{int(v)} spices')
+                        
+                        with ui.column():
+                            ui.label('Max Spices/Spin').classes('text-xs text-slate-300')
+                            slider_spice_global_max_spin = ui.slider(min=1, max=3, value=1, step=1).props('color=pink')
+                            ui.label().bind_text_from(slider_spice_global_max_spin, 'value', lambda v: f'{int(v)} per spin')
+                        
+                        with ui.column():
+                            switch_spice_disable_caroline = ui.switch('Disable if Caroline @ Step 4').props('color=orange')
+                            switch_spice_disable_caroline.value = True
+                            ui.label('Safety: Blocks spices during deep progression').classes('text-xs text-slate-400 italic')
+                        
+                        with ui.column():
+                            switch_spice_disable_neg_pl = ui.switch('Disable if P/L < 0').props('color=orange')
+                            switch_spice_disable_neg_pl.value = True
+                            ui.label('Safety: Only fire spices when in profit').classes('text-xs text-slate-400 italic')
+                
+                # FAMILY A: LIGHT SPICES
+                with ui.expansion('💎 Family A - Light Spices (Low Risk, Frequent)', icon='wb_sunny').classes('w-full bg-gradient-to-r from-cyan-900 to-blue-900 text-white mb-2'):
+                    with ui.grid(columns=3).classes('w-full gap-4 p-4'):
+                        # Zéro Léger
+                        with ui.card().classes('bg-slate-800 p-3 border border-cyan-500'):
+                            ui.label('Zéro Léger (3u)').classes('font-bold text-cyan-300 mb-2')
+                            switch_spice_zero = ui.switch('Enable').props('color=cyan')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_z_trig = ui.label()
+                            slider_spice_zero_trig = ui.slider(min=5, max=50, value=15, step=1).props('color=cyan'); lbl_z_trig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_z_max = ui.label()
+                            slider_spice_zero_max = ui.slider(min=0, max=10, value=2, step=1).props('color=cyan'); lbl_z_max.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_z_cool = ui.label()
+                            slider_spice_zero_cool = ui.slider(min=0, max=30, value=5, step=1).props('color=cyan'); lbl_z_cool.bind_text_from(slider_spice_zero_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_z_min = ui.label()
+                            slider_spice_zero_min_pl = ui.slider(min=0, max=100, value=15, step=5).props('color=cyan'); lbl_z_min.bind_text_from(slider_spice_zero_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_z_max_pl = ui.label()
+                            slider_spice_zero_max_pl = ui.slider(min=20, max=200, value=80, step=10).props('color=cyan'); lbl_z_max_pl.bind_text_from(slider_spice_zero_max_pl, 'value', lambda v: f'+{int(v)}u')
+                        
+                        # Jeu Zéro
+                        with ui.card().classes('bg-slate-800 p-3 border border-cyan-500'):
+                            ui.label('Jeu Zéro (4u)').classes('font-bold text-cyan-300 mb-2')
+                            switch_spice_jeu_zero = ui.switch('Enable').props('color=cyan')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_jz_trig = ui.label()
+                            slider_spice_jeu_zero_trig = ui.slider(min=5, max=50, value=15, step=1).props('color=cyan'); lbl_jz_trig.bind_text_from(slider_spice_jeu_zero_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_jz_max = ui.label()
+                            slider_spice_jeu_zero_max = ui.slider(min=0, max=10, value=2, step=1).props('color=cyan'); lbl_jz_max.bind_text_from(slider_spice_jeu_zero_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_jz_cool = ui.label()
+                            slider_spice_jeu_zero_cool = ui.slider(min=0, max=30, value=5, step=1).props('color=cyan'); lbl_jz_cool.bind_text_from(slider_spice_jeu_zero_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_jz_min = ui.label()
+                            slider_spice_jeu_zero_min_pl = ui.slider(min=0, max=100, value=15, step=5).props('color=cyan'); lbl_jz_min.bind_text_from(slider_spice_jeu_zero_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_jz_max_pl = ui.label()
+                            slider_spice_jeu_zero_max_pl = ui.slider(min=20, max=200, value=80, step=10).props('color=cyan'); lbl_jz_max_pl.bind_text_from(slider_spice_jeu_zero_max_pl, 'value', lambda v: f'+{int(v)}u')
+                        
+                        # Zéro Crown
+                        with ui.card().classes('bg-slate-800 p-3 border border-cyan-500'):
+                            ui.label('Zéro Crown (4u)').classes('font-bold text-cyan-300 mb-2')
+                            switch_spice_zero_crown = ui.switch('Enable').props('color=cyan')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_zc_trig = ui.label()
+                            slider_spice_zero_crown_trig = ui.slider(min=5, max=50, value=15, step=1).props('color=cyan'); lbl_zc_trig.bind_text_from(slider_spice_zero_crown_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_zc_max = ui.label()
+                            slider_spice_zero_crown_max = ui.slider(min=0, max=10, value=2, step=1).props('color=cyan'); lbl_zc_max.bind_text_from(slider_spice_zero_crown_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_zc_cool = ui.label()
+                            slider_spice_zero_crown_cool = ui.slider(min=0, max=30, value=5, step=1).props('color=cyan'); lbl_zc_cool.bind_text_from(slider_spice_zero_crown_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_zc_min = ui.label()
+                            slider_spice_zero_crown_min_pl = ui.slider(min=0, max=100, value=15, step=5).props('color=cyan'); lbl_zc_min.bind_text_from(slider_spice_zero_crown_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_zc_max_pl = ui.label()
+                            slider_spice_zero_crown_max_pl = ui.slider(min=20, max=200, value=80, step=10).props('color=cyan'); lbl_zc_max_pl.bind_text_from(slider_spice_zero_crown_max_pl, 'value', lambda v: f'+{int(v)}u')
+                
+                # FAMILY B: MEDIUM SPICES
+                with ui.expansion('🔥 Family B - Medium Spices (Sector Bets)', icon='casino').classes('w-full bg-gradient-to-r from-purple-900 to-pink-900 text-white mb-2'):
+                    with ui.grid(columns=2).classes('w-full gap-4 p-4'):
+                        # Tiers
+                        with ui.card().classes('bg-slate-800 p-3 border border-purple-500'):
+                            ui.label('Tiers du Cylindre (6u)').classes('font-bold text-purple-300 mb-2')
+                            switch_spice_tiers = ui.switch('Enable').props('color=purple')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_t_trig = ui.label()
+                            slider_spice_tiers_trig = ui.slider(min=10, max=60, value=25, step=1).props('color=purple'); lbl_t_trig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_t_max = ui.label()
+                            slider_spice_tiers_max = ui.slider(min=0, max=5, value=1, step=1).props('color=purple'); lbl_t_max.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_t_cool = ui.label()
+                            slider_spice_tiers_cool = ui.slider(min=0, max=50, value=8, step=1).props('color=purple'); lbl_t_cool.bind_text_from(slider_spice_tiers_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_t_min = ui.label()
+                            slider_spice_tiers_min_pl = ui.slider(min=10, max=100, value=25, step=5).props('color=purple'); lbl_t_min.bind_text_from(slider_spice_tiers_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_t_max_pl = ui.label()
+                            slider_spice_tiers_max_pl = ui.slider(min=30, max=200, value=80, step=10).props('color=purple'); lbl_t_max_pl.bind_text_from(slider_spice_tiers_max_pl, 'value', lambda v: f'+{int(v)}u')
+                        
+                        # Orphelins
+                        with ui.card().classes('bg-slate-800 p-3 border border-purple-500'):
+                            ui.label('Orphelins (5u)').classes('font-bold text-purple-300 mb-2')
+                            switch_spice_orphelins = ui.switch('Enable').props('color=purple')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_o_trig = ui.label()
+                            slider_spice_orphelins_trig = ui.slider(min=10, max=60, value=25, step=1).props('color=purple'); lbl_o_trig.bind_text_from(slider_spice_orphelins_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_o_max = ui.label()
+                            slider_spice_orphelins_max = ui.slider(min=0, max=5, value=1, step=1).props('color=purple'); lbl_o_max.bind_text_from(slider_spice_orphelins_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_o_cool = ui.label()
+                            slider_spice_orphelins_cool = ui.slider(min=0, max=50, value=8, step=1).props('color=purple'); lbl_o_cool.bind_text_from(slider_spice_orphelins_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_o_min = ui.label()
+                            slider_spice_orphelins_min_pl = ui.slider(min=10, max=100, value=25, step=5).props('color=purple'); lbl_o_min.bind_text_from(slider_spice_orphelins_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_o_max_pl = ui.label()
+                            slider_spice_orphelins_max_pl = ui.slider(min=30, max=200, value=80, step=10).props('color=purple'); lbl_o_max_pl.bind_text_from(slider_spice_orphelins_max_pl, 'value', lambda v: f'+{int(v)}u')
+                
+                # FAMILY C: PRESTIGE SPICES
+                with ui.expansion('👑 Family C - Prestige Spices (VIP High Power)', icon='military_tech').classes('w-full bg-gradient-to-r from-yellow-900 to-red-900 text-white mb-2'):
+                    with ui.grid(columns=2).classes('w-full gap-4 p-4'):
+                        # Orphelins en Plein
+                        with ui.card().classes('bg-slate-800 p-3 border border-yellow-500'):
+                            ui.label('Orphelins en Plein (8u)').classes('font-bold text-yellow-300 mb-2')
+                            switch_spice_orphelins_plein = ui.switch('Enable').props('color=yellow')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_op_trig = ui.label()
+                            slider_spice_orphelins_plein_trig = ui.slider(min=20, max=80, value=35, step=1).props('color=yellow'); lbl_op_trig.bind_text_from(slider_spice_orphelins_plein_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_op_max = ui.label()
+                            slider_spice_orphelins_plein_max = ui.slider(min=0, max=3, value=1, step=1).props('color=yellow'); lbl_op_max.bind_text_from(slider_spice_orphelins_plein_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_op_cool = ui.label()
+                            slider_spice_orphelins_plein_cool = ui.slider(min=5, max=60, value=10, step=1).props('color=yellow'); lbl_op_cool.bind_text_from(slider_spice_orphelins_plein_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_op_min = ui.label()
+                            slider_spice_orphelins_plein_min_pl = ui.slider(min=20, max=120, value=35, step=5).props('color=yellow'); lbl_op_min.bind_text_from(slider_spice_orphelins_plein_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_op_max_pl = ui.label()
+                            slider_spice_orphelins_plein_max_pl = ui.slider(min=50, max=300, value=100, step=10).props('color=yellow'); lbl_op_max_pl.bind_text_from(slider_spice_orphelins_plein_max_pl, 'value', lambda v: f'+{int(v)}u')
+                        
+                        # Voisins du Zéro
+                        with ui.card().classes('bg-slate-800 p-3 border border-yellow-500'):
+                            ui.label('Voisins du Zéro (9u)').classes('font-bold text-yellow-300 mb-2')
+                            switch_spice_voisins = ui.switch('Enable').props('color=yellow')
+                            with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_v_trig = ui.label()
+                            slider_spice_voisins_trig = ui.slider(min=20, max=80, value=35, step=1).props('color=yellow'); lbl_v_trig.bind_text_from(slider_spice_voisins_trig, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_v_max = ui.label()
+                            slider_spice_voisins_max = ui.slider(min=0, max=3, value=1, step=1).props('color=yellow'); lbl_v_max.bind_text_from(slider_spice_voisins_max, 'value', lambda v: f'{int(v)}/sess')
+                            with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_v_cool = ui.label()
+                            slider_spice_voisins_cool = ui.slider(min=5, max=60, value=10, step=1).props('color=yellow'); lbl_v_cool.bind_text_from(slider_spice_voisins_cool, 'value', lambda v: f'{int(v)} spins')
+                            with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_v_min = ui.label()
+                            slider_spice_voisins_min_pl = ui.slider(min=20, max=120, value=35, step=5).props('color=yellow'); lbl_v_min.bind_text_from(slider_spice_voisins_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_v_max_pl = ui.label()
+                            slider_spice_voisins_max_pl = ui.slider(min=50, max=300, value=100, step=10).props('color=yellow'); lbl_v_max_pl.bind_text_from(slider_spice_voisins_max_pl, 'value', lambda v: f'+{int(v)}u')
 
             ui.separator().classes('bg-slate-700')
 
