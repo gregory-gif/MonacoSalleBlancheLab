@@ -255,6 +255,7 @@ def show_career_mode():
 
             async def run_batch_with_progress():
                 batch_results = []
+                error_details = []
                 for i in range(num_sims):
                     try:
                         traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
@@ -267,32 +268,39 @@ def show_career_mode():
                             'monthly_cost': monthly_cost
                         })
                     except Exception as e:
+                        error_msg = f"Sim {i+1} error: {str(e)}"
+                        error_details.append(error_msg)
                         print(f"Simulation error: {e}")
-                        import traceback; traceback.print_exc()
+                        import traceback
+                        traceback.print_exc()
                         batch_results.append({
                             'trajectory': [],
                             'log': [
                                 {'month': 0, 'event': 'ERROR', 'details': str(e)}
                             ],
                             'final': 0,
-                            'monthly_cost': 0
+                            'monthly_cost': 0,
+                            'error': str(e)
                         })
                     # Update progress bar (simulate progress)
                     progress.value = (i + 1) / num_sims
                     await asyncio.sleep(0)  # Yield to event loop for UI update
-                return batch_results
+                return batch_results, error_details
 
             # Set progress bar to determinate mode
             progress.props('color=purple')
             progress.value = 0
             progress.set_visibility(True)
-            results = await run_batch_with_progress()
+            results, error_details = await run_batch_with_progress()
             progress.set_visibility(False)
 
             # Filter out failed runs
             valid_results = [r for r in results if r['trajectory']]
             if not valid_results:
-                ui.notify('All simulations failed. Check logs for details.', type='negative')
+                error_msg = 'All simulations failed. Check logs for details.'
+                if error_details:
+                    error_msg += f'\n\nFirst error: {error_details[0]}'
+                ui.notify(error_msg, type='negative', timeout=10000)
                 return
 
             trajectories = np.array([r['trajectory'] for r in valid_results])
