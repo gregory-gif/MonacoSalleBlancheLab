@@ -761,7 +761,7 @@ def show_roulette_sim():
                     table_rows = []
                     for entry in y1_log:
                         res_val = entry.get('result', 0)
-                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
+                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('spins', 0)}" })
                     ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
         with report_container:
