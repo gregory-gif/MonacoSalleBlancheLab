@@ -4,6 +4,7 @@ import random
 import asyncio
 import traceback
 import numpy as np
+import json
 
 # IMPORT RULES
 from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist
@@ -223,7 +224,6 @@ def show_simulator():
             slider_press_depth.value = config.get('tac_depth', 3)
             slider_shoes.value = config.get('tac_shoes', 3)
             
-            # --- FIX: DEFAULT TO 'BANKER' IF MISSING ---
             raw_bet = config.get('tac_bet', 'BANKER')
             if not raw_bet: raw_bet = 'BANKER'
             select_bet_strat.value = raw_bet
@@ -285,7 +285,6 @@ def show_simulator():
                 'base_bet': float(slider_base_bet.value) 
             }
             
-            # --- FIX: SAFETY GUARD FOR BET SELECTION ---
             raw_bet = select_bet_strat.value
             if not raw_bet: raw_bet = 'BANKER'
             
@@ -295,8 +294,7 @@ def show_simulator():
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                spice_zero_enabled=False, spice_tiers_enabled=False
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
             )
             
             res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
@@ -341,7 +339,6 @@ def show_simulator():
                 'base_bet': float(slider_base_bet.value)
             }
             
-            # --- FIX: SAFETY GUARD FOR BET SELECTION ---
             raw_bet = select_bet_strat.value
             if not raw_bet: raw_bet = 'BANKER'
             
@@ -351,8 +348,7 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                spice_zero_enabled=False, spice_tiers_enabled=False
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
             )
 
             start_ga = config['start_ga']
@@ -469,13 +465,16 @@ def show_simulator():
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
+            
             if y1_log:
                 lines.append("\n=== OUR YEAR 1 DATA (COPY/PASTE) ===")
                 lines.append("Month,Result,Total_Bal,Game_Bal,Hands")
                 for e in y1_log:
                     lines.append(f"{e['month']},{e['result']},{e['balance']},{e['game_bal']},{e['hands']}")
-            lines_text = "\n".join(lines)
-            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{lines_text}</pre>', sanitize=False)
+            
+            # SAFE STRING FORMATTING FOR REPORT
+            log_content = "\n".join(lines)
+            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
