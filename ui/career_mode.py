@@ -99,12 +99,12 @@ class CareerManager:
             
             for _ in range(sessions_this_month):
                 if game_type == 'Roulette':
-                    # --- ROULETTE ENGINE ---
-                    pnl, vol, used_lvl, hands, exit_reason, press_streak = RouletteWorker.run_session(
+                    # --- ROULETTE ENGINE (returns 9 values) ---
+                    pnl, vol, used_lvl, spins, spice_stats, exit_reason, max_caroline, max_dalembert, press_streak = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE ---
+                    # --- BACCARAT ENGINE (returns 6 values) ---
                     pnl, vol, used_lvl, hands, exit_reason, press_streak = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
