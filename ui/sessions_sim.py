@@ -65,61 +65,105 @@ def show_sessions_sim():
                 ui.notify('Add at least one strategy to the session.', type='warning')
                 return
             
-            progress_bar.set_visibility(True)
-            progress_bar.set_value(0)
-            status_label.set_text('Running simulations...')
-            
-            num_sessions = slider_num_sessions.value
-            start_bankroll = slider_start_bankroll.value
-            profile = load_profile()
-            saved_strats = profile.get('saved_strategies', {})
-            all_results = []
-            
-            for s in range(num_sessions):
-                session_log = []
-                bankroll = start_bankroll
-                for strat in session_strategies:
-                    strat_cfg = saved_strats.get(strat['strategy'])
-                    if not strat_cfg:
-                        session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': 'NOT FOUND', 'bankroll': bankroll})
-                        continue
-                    # Prepare overrides and tier map
-                    overrides = StrategyOverrides(**strat_cfg)
-                    tier_map = generate_tier_map(strat_cfg.get('tac_safety', 25), mode=strat_cfg.get('tac_mode', 'Standard'), game_type=strat['game'], base_bet=strat_cfg.get('tac_base_bet', 10.0))
-                    active_level = 1
-                    mode = strat_cfg.get('tac_mode', 'Standard')
-                    base_bet = strat_cfg.get('tac_base_bet', 10.0)
-                    # Simulate
-                    if strat['game'] == 'Roulette':
-                        pnl, *_ = RouletteWorker.run_session(bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
-                    else:
-                        pnl, *_ = BaccaratWorker.run_session(bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
-                    bankroll += pnl
-                    session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': bankroll})
-                all_results.append({'session': s+1, 'final_bankroll': bankroll, 'log': session_log})
+            try:
+                progress_bar.set_visibility(True)
+                progress_bar.set_value(0)
+                status_label.set_text('Running simulations...')
+                
+                num_sessions = int(slider_num_sessions.value)
+                start_bankroll = float(slider_start_bankroll.value)
+                profile = load_profile()
+                saved_strats = profile.get('saved_strategies', {})
+                
+                def run_all_sessions():
+                    all_results = []
+                    for s in range(num_sessions):
+                        session_log = []
+                        bankroll = start_bankroll
+                        for strat in session_strategies:
+                            strat_cfg = saved_strats.get(strat['strategy'])
+                            if not strat_cfg:
+                                session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': 'NOT FOUND', 'bankroll': bankroll})
+                                continue
+                            
+                            # Create overrides from saved config
+                            from engine.strategy_rules import BetStrategy
+                            
+                            # Get bet strategy
+                            raw_bet = strat_cfg.get('tac_bet', 'BANKER')
+                            if strat['game'] == 'Baccarat':
+                                bet_strat = getattr(BetStrategy, raw_bet, BetStrategy.BANKER)
+                            else:
+                                bet_strat = raw_bet  # For roulette it's a string
+                            
+                            overrides = StrategyOverrides(
+                                iron_gate_limit=strat_cfg.get('tac_iron', 3),
+                                stop_loss_units=strat_cfg.get('risk_stop', 10),
+                                profit_lock_units=strat_cfg.get('risk_prof', 10),
+                                press_trigger_wins=strat_cfg.get('tac_press', 1),
+                                press_depth=strat_cfg.get('tac_depth', 3),
+                                bet_strategy=bet_strat,
+                                shoes_per_session=strat_cfg.get('tac_shoes', 3),
+                                penalty_box_enabled=strat_cfg.get('tac_penalty', True),
+                                ratchet_enabled=strat_cfg.get('risk_ratch', False),
+                                ratchet_mode=strat_cfg.get('risk_ratch_mode', 'Standard'),
+                                smart_exit_enabled=strat_cfg.get('smart_exit_enabled', True),
+                                smart_window_start=strat_cfg.get('smart_window_start', 90),
+                                min_profit_to_lock=strat_cfg.get('min_profit_to_lock', 20),
+                                trailing_drop_pct=strat_cfg.get('trailing_drop_pct', 0.20)
+                            )
+                            
+                            tier_map = generate_tier_map(
+                                strat_cfg.get('tac_safety', 25), 
+                                mode=strat_cfg.get('tac_mode', 'Standard'), 
+                                game_type=strat['game'], 
+                                base_bet=strat_cfg.get('tac_base_bet', 10.0)
+                            )
+                            active_level = 1
+                            mode = strat_cfg.get('tac_mode', 'Standard')
+                            base_bet = strat_cfg.get('tac_base_bet', 10.0)
+                            
+                            # Simulate
+                            if strat['game'] == 'Roulette':
+                                pnl, *_ = RouletteWorker.run_session(bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
+                            else:
+                                pnl, *_ = BaccaratWorker.run_session(bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
+                            
+                            bankroll += pnl
+                            session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': bankroll})
+                        
+                        all_results.append({'session': s+1, 'final_bankroll': bankroll, 'log': session_log})
+                    return all_results
+                
+                # Run in thread
+                all_results = await asyncio.to_thread(run_all_sessions)
                 
                 # Update progress
-                progress_bar.set_value((s + 1) / num_sessions)
-                status_label.set_text(f'Completed {s + 1}/{num_sessions} sessions...')
-                await asyncio.sleep(0.01)  # Allow UI to update
+                progress_bar.set_value(1.0)
+                status_label.set_text('Simulation complete!')
+                progress_bar.set_visibility(False)
+                
+                # Display results
+                results_area.clear()
+                with results_area:
+                    ui.label('SESSION SIM RESULTS').classes('text-lg text-orange-300 font-bold')
+                    table_rows = []
+                    for res in all_results:
+                        table_rows.append({'Session': res['session'], 'Final Bankroll': f"€{res['final_bankroll']:,.0f}"})
+                    if table_rows:
+                        ui.aggrid({'columnDefs': [{'headerName': 'Session', 'field': 'Session', 'width': 80}, {'headerName': 'Final Bankroll', 'field': 'Final Bankroll', 'width': 120}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
+                    # Expandable logs
+                    for res in all_results:
+                        with ui.expansion(f"Session {res['session']} Log", icon='history').classes('w-full bg-slate-800 mt-2'):
+                            for entry in res['log']:
+                                ui.label(f"{entry['game']} - {entry['strategy']}: Result = €{entry['result']:,.2f} | Bankroll: €{entry['bankroll']:,.0f}").classes('text-xs text-slate-300')
             
-            progress_bar.set_visibility(False)
-            status_label.set_text('Simulation complete!')
-            
-            # Display results
-            results_area.clear()
-            with results_area:
-                ui.label('SESSION SIM RESULTS').classes('text-lg text-orange-300 font-bold')
-                table_rows = []
-                for res in all_results:
-                    table_rows.append({'Session': res['session'], 'Final Bankroll': f"€{res['final_bankroll']:,.0f}"})
-                if table_rows:
-                    ui.aggrid({'columnDefs': [{'headerName': 'Session', 'field': 'Session', 'width': 80}, {'headerName': 'Final Bankroll', 'field': 'Final Bankroll', 'width': 120}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
-                # Expandable logs
-                for res in all_results:
-                    with ui.expansion(f"Session {res['session']} Log", icon='history').classes('w-full bg-slate-800 mt-2'):
-                        for entry in res['log']:
-                            ui.label(f"{entry['game']} - {entry['strategy']}: Result = {entry['result']} | Bankroll: €{entry['bankroll']:,.0f}").classes('text-xs text-slate-300')
+            except Exception as e:
+                progress_bar.set_visibility(False)
+                status_label.set_text(f'Error: {str(e)}')
+                ui.notify(f'Simulation error: {str(e)}', type='negative')
+                import traceback
+                print(traceback.format_exc())
 
         # Create run button with proper async handler
         ui.button('RUN SESSIONS SIM', on_click=run_sessions_sim).props('icon=play_arrow color=green size=lg').classes('w-full mt-4')
