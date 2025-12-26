@@ -228,7 +228,12 @@ def show_simulator():
                 'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
                 'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
                 'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
-                'tac_base_bet': slider_base_bet.value
+                'tac_base_bet': slider_base_bet.value,
+                # Smart Trailing Stop
+                'smart_exit_enabled': switch_smart_exit.value,
+                'smart_window_start': slider_smart_window.value,
+                'min_profit_to_lock': slider_min_lock.value,
+                'trailing_drop_pct': slider_trail_pct.value
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -274,6 +279,13 @@ def show_simulator():
             slider_earn_rate.value = config.get('gold_earn', 10)
             slider_start_ga.value = config.get('start_ga', 2000)
             slider_base_bet.value = config.get('tac_base_bet', 5.0)
+            
+            # Smart Trailing Stop LOADS
+            switch_smart_exit.value = config.get('smart_exit_enabled', True)
+            slider_smart_window.value = config.get('smart_window_start', 190)
+            slider_min_lock.value = config.get('min_profit_to_lock', 20)
+            slider_trail_pct.value = config.get('trailing_drop_pct', 0.20)
+            
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
 
@@ -330,7 +342,12 @@ def show_simulator():
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                # Smart Trailing Stop
+                smart_exit_enabled=switch_smart_exit.value,
+                smart_window_start=int(slider_smart_window.value),
+                min_profit_to_lock=int(slider_min_lock.value),
+                trailing_drop_pct=float(slider_trail_pct.value)
             )
             
             res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
@@ -384,7 +401,12 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                # Smart Trailing Stop
+                smart_exit_enabled=switch_smart_exit.value,
+                smart_window_start=int(slider_smart_window.value),
+                min_profit_to_lock=int(slider_min_lock.value),
+                trailing_drop_pct=float(slider_trail_pct.value)
             )
 
             start_ga = config['start_ga']
@@ -592,6 +614,27 @@ def show_simulator():
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
                     slider_iron_gate = ui.slider(min=2, max=10, value=3).props('color=purple'); ui.label().bind_text_from(slider_iron_gate, 'value', lambda v: f'Iron Gate {v}')
+                    
+                    # Smart Trailing Stop Controls
+                    ui.separator().classes('bg-slate-700 my-2')
+                    ui.label('🎯 SMART TRAILING STOP (190-220 hands)').classes('text-xs text-yellow-400 font-bold')
+                    switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
+                    switch_smart_exit.value = True
+                    with ui.row().classes('w-full justify-between items-center'): 
+                        ui.label('Start Window').classes('text-xs text-slate-400')
+                        lbl_smart_window = ui.label()
+                    slider_smart_window = ui.slider(min=150, max=240, value=190, step=10).props('color=yellow')
+                    lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Hand {int(v)}')
+                    with ui.row().classes('w-full justify-between items-center'): 
+                        ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
+                        lbl_min_lock = ui.label()
+                    slider_min_lock = ui.slider(min=5, max=50, value=20, step=5).props('color=yellow')
+                    lbl_min_lock.bind_text_from(slider_min_lock, 'value', lambda v: f'+{int(v)}u')
+                    with ui.row().classes('w-full justify-between items-center'): 
+                        ui.label('Trailing Drop %').classes('text-xs text-slate-400')
+                        lbl_trail_pct = ui.label()
+                    slider_trail_pct = ui.slider(min=0.10, max=0.40, value=0.20, step=0.05).props('color=yellow')
+                    lbl_trail_pct.bind_text_from(slider_trail_pct, 'value', lambda v: f'{int(v*100)}%')
 
             ui.separator().classes('bg-slate-700')
             with ui.row().classes('w-full items-center justify-between'):
