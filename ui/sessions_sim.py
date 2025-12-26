@@ -53,20 +53,28 @@ def show_sessions_sim():
             ui.label().bind_text_from(slider_start_bankroll, 'value', lambda v: f'Starting Bankroll: €{v:,.0f}')
             slider_num_sessions = ui.slider(min=1, max=500, value=20).props('color=cyan')
             ui.label().bind_text_from(slider_num_sessions, 'value', lambda v: f'{v} Sessions')
-            run_button = ui.button('RUN SESSIONS SIM', on_click=lambda: ui.notify('Simulation logic not yet implemented', type='warning')).props('icon=play_arrow color=green size=lg').classes('w-full mt-4')
 
         # Results area placeholder
         results_area = ui.column().classes('w-full mt-8')
+        progress_bar = ui.linear_progress().props('color=green').classes('mt-4')
+        progress_bar.set_visibility(False)
+        status_label = ui.label('').classes('text-sm text-slate-400 mt-2')
 
         async def run_sessions_sim():
             if not session_strategies:
                 ui.notify('Add at least one strategy to the session.', type='warning')
                 return
+            
+            progress_bar.set_visibility(True)
+            progress_bar.set_value(0)
+            status_label.set_text('Running simulations...')
+            
             num_sessions = slider_num_sessions.value
             start_bankroll = slider_start_bankroll.value
             profile = load_profile()
             saved_strats = profile.get('saved_strategies', {})
             all_results = []
+            
             for s in range(num_sessions):
                 session_log = []
                 bankroll = start_bankroll
@@ -89,6 +97,15 @@ def show_sessions_sim():
                     bankroll += pnl
                     session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': bankroll})
                 all_results.append({'session': s+1, 'final_bankroll': bankroll, 'log': session_log})
+                
+                # Update progress
+                progress_bar.set_value((s + 1) / num_sessions)
+                status_label.set_text(f'Completed {s + 1}/{num_sessions} sessions...')
+                await asyncio.sleep(0.01)  # Allow UI to update
+            
+            progress_bar.set_visibility(False)
+            status_label.set_text('Simulation complete!')
+            
             # Display results
             results_area.clear()
             with results_area:
@@ -104,8 +121,8 @@ def show_sessions_sim():
                         for entry in res['log']:
                             ui.label(f"{entry['game']} - {entry['strategy']}: Result = {entry['result']} | Bankroll: €{entry['bankroll']:,.0f}").classes('text-xs text-slate-300')
 
-        # Replace run button action directly
-        run_button.on('click', lambda: asyncio.ensure_future(run_sessions_sim()))
+        # Create run button with proper async handler
+        ui.button('RUN SESSIONS SIM', on_click=run_sessions_sim).props('icon=play_arrow color=green size=lg').classes('w-full mt-4')
 
 def setup():
     show_sessions_sim()
