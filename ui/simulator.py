@@ -103,7 +103,7 @@ class BaccaratWorker:
                 elif state.session_pnl <= state.locked_profit:
                     exit_reason = 'RATCHET'
 
-        return state.session_pnl, volume, tier.level, hands_played_total, exit_reason, state.current_press_streak
+        return state.session_pnl, volume, tier.level, hands_played_total, exit_reason, state.current_press_streak, session_peak_profit
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -157,7 +157,7 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands, exit_reason, final_streak = BaccaratWorker.run_session(
+                    pnl, vol, used_level, hands, exit_reason, final_streak, peak_profit = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -186,7 +186,7 @@ class BaccaratWorker:
                             'tp_boosts': 0,  # Not used in Baccarat
                             'caroline_max': 0,  # Not used in Baccarat
                             'dalembert_max': 0, # Not used in Baccarat
-                            'peak_profit': 0    # Not tracked in current Baccarat, could be added if needed
+                            'peak_profit': peak_profit
                         })
             else:
                 if track_y1_details and m < 12:
@@ -427,7 +427,9 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                # Smart Trailing Stop config (defaults)
+                smart_exit_enabled=True, smart_window_start=30, min_profit_to_lock=5, trailing_drop_pct=0.25
             )
 
             start_ga = config['start_ga']
@@ -532,37 +534,57 @@ def show_simulator():
                         table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
                     ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
-        with report_container:
-            report_container.clear()
-            lines = ["=== BACCARAT CONFIGURATION ==="]
-            lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-            lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
-            lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
-            lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
-            lines.append("\n=== PERFORMANCE RESULTS ===")
-            lines.append(f"Total Survival Rate: {score_survival:.1f}%")
-            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
-            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
-            lines.append(f"Active Play Time: {active_pct:.1f}%")
-            
-            if y1_log:
-                lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
-                lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max")
-                for e in y1_log:
-                    lines.append(
-                        f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
-                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']}"
-                    )
-            
-            # SAFE STRING FORMATTING FOR REPORT
-            log_content = "\n".join(lines)
-            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
+            with report_container:
+                report_container.clear()
+                lines = ["=== BACCARAT CONFIGURATION ==="]
+                lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
+                lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
+                lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
+                lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+                lines.append(f"Smart Trailing Stop: {overrides.smart_exit_enabled} (Window: Hand {overrides.smart_window_start}, Min Lock: {overrides.min_profit_to_lock}u, Drop: {overrides.trailing_drop_pct*100:.0f}%)")
+                lines.append("\n=== PERFORMANCE RESULTS ===")
+                lines.append(f"Total Survival Rate: {score_survival:.1f}%")
+                lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
+                lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+                lines.append(f"Active Play Time: {active_pct:.1f}%")
+                
+                if y1_log:
+                    lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
+                    lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Peak_Profit")
+                    for e in y1_log:
+                        lines.append(
+                            f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
+                            f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']},{e.get('peak_profit',0):.0f}"
+                        )
+                
+                # SAFE STRING FORMATTING FOR REPORT
+                log_content = "\n".join(lines)
+                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
-        
-        with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
+
+        # --- CSV UPLOAD & DISPLAY ---
+        with ui.expansion('Upload & View Baccarat CSV Data', icon='table_view').classes('w-full bg-slate-800 text-cyan-200 mb-4'):
+            csv_table_area = ui.column().classes('w-full')
+            def handle_csv_upload(e):
+                import csv
+                import io
+                file = e.content
+                decoded = file.decode('utf-8')
+                reader = csv.DictReader(io.StringIO(decoded))
+                rows = list(reader)
+                if rows:
+                    # Dynamically create columns from CSV headers
+                    columns = [{'headerName': h, 'field': h, 'width': 100} for h in rows[0].keys()]
+                    csv_table_area.clear()
+                    ui.aggrid({'columnDefs': columns, 'rowData': rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
+                else:
+                    csv_table_area.clear()
+                    ui.label('No data found in CSV.').classes('text-red-400')
+            ui.upload(on_upload=handle_csv_upload, label='Upload Baccarat CSV').props('accept=.csv').classes('mb-2')
+            csv_table_area
             
             # STRATEGY LIBRARY RESTORED HERE
             with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
@@ -615,6 +637,10 @@ def show_simulator():
                         slider_holiday_ceil = ui.slider(min=5000, max=50000, value=10000); ui.label().bind_text_from(slider_holiday_ceil, 'value', lambda v: f'Hol Ceil €{v}')
                         slider_insolvency = ui.slider(min=0, max=5000, value=1000); ui.label().bind_text_from(slider_insolvency, 'value', lambda v: f'Floor €{v}')
                         slider_tax_thresh = ui.slider(min=5000, max=50000, value=12500); ui.label().bind_text_from(slider_tax_thresh, 'value', lambda v: f'Tax Thresh €{v}')
+                                # Smart Trailing Toggle
+                                with ui.row().classes('w-full justify-between mt-2'):
+                                    ui.label('Smart Trailing Stop').classes('text-xs text-slate-400')
+                                    smart_trailing_toggle = ui.switch('Enable', value=True).classes('ml-2')
                         slider_tax_rate = ui.slider(min=5, max=50, value=25)
 
                 with ui.column():

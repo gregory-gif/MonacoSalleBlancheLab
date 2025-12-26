@@ -53,7 +53,7 @@ def show_sessions_sim():
             ui.label().bind_text_from(slider_start_bankroll, 'value', lambda v: f'Starting Bankroll: €{v:,.0f}')
             slider_num_sessions = ui.slider(min=1, max=500, value=20).props('color=cyan')
             ui.label().bind_text_from(slider_num_sessions, 'value', lambda v: f'{v} Sessions')
-            ui.button('RUN SESSIONS SIM', on_click=lambda: ui.notify('Simulation logic not yet implemented', type='warning')).props('icon=play_arrow color=green size=lg').classes('w-full mt-4')
+            run_button = ui.button('RUN SESSIONS SIM', on_click=lambda: ui.notify('Simulation logic not yet implemented', type='warning')).props('icon=play_arrow color=green size=lg').classes('w-full mt-4')
 
         # Results area placeholder
         results_area = ui.column().classes('w-full mt-8')
@@ -104,10 +104,8 @@ def show_sessions_sim():
                         for entry in res['log']:
                             ui.label(f"{entry['game']} - {entry['strategy']}: Result = {entry['result']} | Bankroll: €{entry['bankroll']:,.0f}").classes('text-xs text-slate-300')
 
-        # Replace run button action
-        for c in ui.get_root().children:
-            if hasattr(c, 'text') and c.text == 'RUN SESSIONS SIM':
-                c.on('click', lambda: asyncio.ensure_future(run_sessions_sim()))
+        # Replace run button action directly
+        run_button.on('click', lambda: asyncio.ensure_future(run_sessions_sim()))
 
 def setup():
     show_sessions_sim()

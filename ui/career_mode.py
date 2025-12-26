@@ -99,16 +99,16 @@ class CareerManager:
             
             for _ in range(sessions_this_month):
                 if game_type == 'Roulette':
-                    # --- ROULETTE ENGINE (returns 10 values) ---
-                    pnl, vol, used_lvl, spins, spice_stats, exit_reason, max_caroline, max_dalembert, press_streak, peak_profit = RouletteWorker.run_session(
+                    # --- ROULETTE ENGINE ---
+                    # Unpack only the first 4 values, ignore the rest
+                    pnl, vol, used_lvl, hands, *_ = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE (returns 6 values) ---
-                    pnl, vol, used_lvl, hands, exit_reason, press_streak = BaccaratWorker.run_session(
+                    # --- BACCARAT ENGINE (Updated Call) ---
+                    pnl, vol, used_lvl, hands, *_ = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
-                
                 current_ga += pnl
                 active_level = used_lvl 
                 last_session_won = (pnl > 0)
@@ -155,12 +155,15 @@ class CareerManager:
             bet_strategy=bet_strat_obj,
             penalty_box_enabled=config.get('tac_penalty', True),
             
-            # SPICE v5.0 Configs - Use defaults (all disabled) for career mode
-            # Individual spice types can be configured in the UI if needed
-            spice_global_max_per_session=config.get('spice_global_max_session', 3),
-            spice_global_max_per_spin=config.get('spice_global_max_spin', 1),
-            spice_disable_if_caroline_step4=config.get('spice_disable_caroline', True),
-            spice_disable_if_pl_below_zero=config.get('spice_disable_below_zero', True)
+            # Spice Configs (Safe Defaults)
+            spice_zero_enabled=config.get('spice_zero_en', False),
+            spice_zero_trigger=config.get('spice_zero_trig', 15),
+            spice_zero_max=config.get('spice_zero_max', 100),
+            spice_zero_cooldown=config.get('spice_zero_cool', 10),
+            spice_tiers_enabled=config.get('spice_tiers_en', False),
+            spice_tiers_trigger=config.get('spice_tiers_trig', 25),
+            spice_tiers_max=config.get('spice_tiers_max', 100),
+            spice_tiers_cooldown=config.get('spice_tiers_cool', 10)
         )
         use_ratchet = config.get('risk_ratch', False)
         penalty_mode = config.get('tac_penalty', True)
@@ -255,7 +258,6 @@ def show_career_mode():
 
             async def run_batch_with_progress():
                 batch_results = []
-                error_details = []
                 for i in range(num_sims):
                     try:
                         traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
@@ -268,39 +270,32 @@ def show_career_mode():
                             'monthly_cost': monthly_cost
                         })
                     except Exception as e:
-                        error_msg = f"Sim {i+1} error: {str(e)}"
-                        error_details.append(error_msg)
                         print(f"Simulation error: {e}")
-                        import traceback
-                        traceback.print_exc()
+                        import traceback; traceback.print_exc()
                         batch_results.append({
                             'trajectory': [],
                             'log': [
                                 {'month': 0, 'event': 'ERROR', 'details': str(e)}
                             ],
                             'final': 0,
-                            'monthly_cost': 0,
-                            'error': str(e)
+                            'monthly_cost': 0
                         })
                     # Update progress bar (simulate progress)
                     progress.value = (i + 1) / num_sims
                     await asyncio.sleep(0)  # Yield to event loop for UI update
-                return batch_results, error_details
+                return batch_results
 
             # Set progress bar to determinate mode
             progress.props('color=purple')
             progress.value = 0
             progress.set_visibility(True)
-            results, error_details = await run_batch_with_progress()
+            results = await run_batch_with_progress()
             progress.set_visibility(False)
 
             # Filter out failed runs
             valid_results = [r for r in results if r['trajectory']]
             if not valid_results:
-                error_msg = 'All simulations failed. Check logs for details.'
-                if error_details:
-                    error_msg += f'\n\nFirst error: {error_details[0]}'
-                ui.notify(error_msg, type='negative', timeout=10000)
+                ui.notify('All simulations failed. Check logs for details.', type='negative')
                 return
 
             trajectories = np.array([r['trajectory'] for r in valid_results])
@@ -400,7 +395,7 @@ def show_career_mode():
                 
                 select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
                 ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
-                slider_target = ui.slider(min=2000, max=100000, step=1000, value=10000).props('color=yellow')
+                slider_target = ui.slider(min=1000, max=100000, step=1000, value=10000).props('color=yellow')
                 ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
                 
                 ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
