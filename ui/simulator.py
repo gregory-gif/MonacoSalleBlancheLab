@@ -18,15 +18,15 @@ class BaccaratWorker:
     @staticmethod
     def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0):
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Baccarat')
-        
+
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
-            flat_bet = base_bet 
+            flat_bet = base_bet
             tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
                 profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
-                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False 
+                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False
             )
         else:
             session_overrides = overrides
@@ -35,46 +35,74 @@ class BaccaratWorker:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
+        # --- SMART TRAILING STOP CONFIG ---
+        smart_exit_enabled = getattr(session_overrides, 'smart_exit_enabled', True)
+        smart_window_start = getattr(session_overrides, 'smart_window_start', 30)  # hands
+        min_profit_to_lock = getattr(session_overrides, 'min_profit_to_lock', 5)   # units
+        trailing_drop_pct = getattr(session_overrides, 'trailing_drop_pct', 0.25)  # 25%
+
         state = BaccaratSessionState(tier=tier, overrides=session_overrides)
         state.current_shoe = 1
         volume = 0
-        
+        session_peak_profit = 0.0
+        hands_played_total = 0
+        exit_reason = None
+
         while state.current_shoe <= overrides.shoes_per_session and state.mode.name != 'STOPPED':
             decision = BaccaratStrategist.get_next_decision(state)
             if decision['mode'].name == 'STOPPED': break
-            
+
             amt = decision['bet_amount']
             volume += amt
-            
+            hands_played_total += 1
+
             # Simulation Physics
             is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            won = (random.random() < 0.5) 
-            
+            won = (random.random() < 0.5)
+
             pnl = 0
             if won:
                 pnl = amt * 0.95 if is_banker else amt
             else:
                 pnl = -amt
-                
+
             BaccaratStrategist.update_state_after_hand(state, won, pnl)
-            
+
+            # --- SMART TRAILING STOP LOGIC ---
+            current_profit = state.session_pnl
+            if current_profit > session_peak_profit:
+                session_peak_profit = current_profit
+
+            if (
+                smart_exit_enabled and
+                hands_played_total >= smart_window_start
+            ):
+                min_lock_threshold = min_profit_to_lock * base_bet
+                if current_profit >= min_lock_threshold:
+                    dynamic_floor = session_peak_profit * (1.0 - trailing_drop_pct)
+                    if current_profit <= dynamic_floor:
+                        state.mode.name = 'STOPPED'
+                        exit_reason = 'SMART_TRAILING'
+                        break
+
             if state.hands_played_in_shoe >= 70:
                 state.current_shoe += 1
                 state.hands_played_in_shoe = 0
 
         # Determine exit reason
-        exit_reason = 'TIME_LIMIT'
-        if state.mode.name == 'STOPPED':
-            stop_val = -(overrides.stop_loss_units * tier.base_unit)
-            target_val = overrides.profit_lock_units * tier.base_unit
-            if state.session_pnl <= stop_val:
-                exit_reason = 'STOP_LOSS'
-            elif state.session_pnl >= target_val:
-                exit_reason = 'TARGET'
-            elif state.session_pnl <= state.locked_profit:
-                exit_reason = 'RATCHET'
+        if exit_reason is None:
+            exit_reason = 'TIME_LIMIT'
+            if state.mode.name == 'STOPPED':
+                stop_val = -(overrides.stop_loss_units * tier.base_unit)
+                target_val = overrides.profit_lock_units * tier.base_unit
+                if state.session_pnl <= stop_val:
+                    exit_reason = 'STOP_LOSS'
+                elif state.session_pnl >= target_val:
+                    exit_reason = 'TARGET'
+                elif state.session_pnl <= state.locked_profit:
+                    exit_reason = 'RATCHET'
 
-        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak
+        return state.session_pnl, volume, tier.level, hands_played_total, exit_reason, state.current_press_streak
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -150,22 +178,36 @@ class BaccaratWorker:
                             'volume': vol,
                             'tier': used_level,
                             'exit': exit_reason,
-                            'streak_max': final_streak
+                            'streak_max': final_streak,
+                            # Extra fields for parity with Roulette sim
+                            'spice_cnt': 0,  # Not used in Baccarat
+                            'spice_pl': 0,   # Not used in Baccarat
+                            'tp_boosts': 0,  # Not used in Baccarat
+                            'caroline_max': 0,  # Not used in Baccarat
+                            'dalembert_max': 0, # Not used in Baccarat
+                            'peak_profit': 0    # Not tracked in current Baccarat, could be added if needed
                         })
             else:
-                 if track_y1_details and m < 12:
-                        y1_log.append({
-                            'month': m + 1,
-                            'session': 0,
-                            'result': 0,
-                            'balance': current_ga,
-                            'game_bal': start_ga + running_play_pnl,
-                            'hands': 0,
-                            'volume': 0,
-                            'tier': 0,
-                            'exit': 'INSOLVENT',
-                            'streak_max': 0
-                        })
+                if track_y1_details and m < 12:
+                    y1_log.append({
+                        'month': m + 1,
+                        'session': 0,
+                        'result': 0,
+                        'balance': current_ga,
+                        'game_bal': start_ga + running_play_pnl,
+                        'hands': 0,
+                        'volume': 0,
+                        'tier': 0,
+                        'exit': 'INSOLVENT',
+                        'streak_max': 0,
+                        # Extra fields for parity with Roulette sim
+                        'spice_cnt': 0,
+                        'spice_pl': 0,
+                        'tp_boosts': 0,
+                        'caroline_max': 0,
+                        'dalembert_max': 0,
+                        'peak_profit': 0
+                    })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
