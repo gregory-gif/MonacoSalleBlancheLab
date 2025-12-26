@@ -81,7 +81,8 @@ class BaccaratWorker:
                 if current_profit >= min_lock_threshold:
                     dynamic_floor = session_peak_profit * (1.0 - trailing_drop_pct)
                     if current_profit <= dynamic_floor:
-                        state.mode.name = 'STOPPED'
+                        from engine.strategy_rules import PlayMode
+                        state.mode = PlayMode.STOPPED
                         exit_reason = 'SMART_TRAILING'
                         break
 
