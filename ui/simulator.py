@@ -637,11 +637,12 @@ def show_simulator():
                         slider_holiday_ceil = ui.slider(min=5000, max=50000, value=10000); ui.label().bind_text_from(slider_holiday_ceil, 'value', lambda v: f'Hol Ceil €{v}')
                         slider_insolvency = ui.slider(min=0, max=5000, value=1000); ui.label().bind_text_from(slider_insolvency, 'value', lambda v: f'Floor €{v}')
                         slider_tax_thresh = ui.slider(min=5000, max=50000, value=12500); ui.label().bind_text_from(slider_tax_thresh, 'value', lambda v: f'Tax Thresh €{v}')
-                                # Smart Trailing Toggle
-                                with ui.row().classes('w-full justify-between mt-2'):
-                                    ui.label('Smart Trailing Stop').classes('text-xs text-slate-400')
-                                    smart_trailing_toggle = ui.switch('Enable', value=True).classes('ml-2')
                         slider_tax_rate = ui.slider(min=5, max=50, value=25)
+
+                    # Smart Trailing Toggle (move out of eco settings)
+                    with ui.row().classes('w-full justify-between mt-2'):
+                        ui.label('Smart Trailing Stop').classes('text-xs text-slate-400')
+                        smart_trailing_toggle = ui.switch('Enable', value=True).classes('ml-2')
 
                 with ui.column():
                     ui.label('BACCARAT GAMEPLAY').classes('font-bold text-cyan-400')
