@@ -550,11 +550,13 @@ def show_simulator():
                 
                 if y1_log:
                     lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
+                    # Full baccarat export fields from CSV_DATA_DICTIONARY.md
                     lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Peak_Profit")
                     for e in y1_log:
+                        # Use .get with defaults for robustness
                         lines.append(
-                            f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
-                            f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']},{e.get('peak_profit',0):.0f}"
+                            f"{e.get('month','')},{e.get('session','')},{e.get('result',0):.0f},{e.get('balance',0):.0f},{e.get('game_bal',0):.0f},"
+                            f"{e.get('hands',0)},{e.get('volume',0):.0f},{e.get('tier','')},{e.get('exit','')},{e.get('streak_max',0)},{e.get('peak_profit',0):.0f}"
                         )
                 
                 # SAFE STRING FORMATTING FOR REPORT
@@ -565,26 +567,7 @@ def show_simulator():
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
 
-        # --- CSV UPLOAD & DISPLAY ---
-        with ui.expansion('Upload & View Baccarat CSV Data', icon='table_view').classes('w-full bg-slate-800 text-cyan-200 mb-4'):
-            csv_table_area = ui.column().classes('w-full')
-            def handle_csv_upload(e):
-                import csv
-                import io
-                file = e.content
-                decoded = file.decode('utf-8')
-                reader = csv.DictReader(io.StringIO(decoded))
-                rows = list(reader)
-                if rows:
-                    # Dynamically create columns from CSV headers
-                    columns = [{'headerName': h, 'field': h, 'width': 100} for h in rows[0].keys()]
-                    csv_table_area.clear()
-                    ui.aggrid({'columnDefs': columns, 'rowData': rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
-                else:
-                    csv_table_area.clear()
-                    ui.label('No data found in CSV.').classes('text-red-400')
-            ui.upload(on_upload=handle_csv_upload, label='Upload Baccarat CSV').props('accept=.csv').classes('mb-2')
-            csv_table_area
+
             
             # STRATEGY LIBRARY RESTORED HERE
             with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
