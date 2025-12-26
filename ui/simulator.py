@@ -18,15 +18,15 @@ class BaccaratWorker:
     @staticmethod
     def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0):
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Baccarat')
-
+        
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
-            flat_bet = base_bet
+            flat_bet = base_bet 
             tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
                 profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
-                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False
+                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False 
             )
         else:
             session_overrides = overrides
@@ -35,75 +35,46 @@ class BaccaratWorker:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
-        # --- SMART TRAILING STOP CONFIG ---
-        smart_exit_enabled = getattr(session_overrides, 'smart_exit_enabled', True)
-        smart_window_start = getattr(session_overrides, 'smart_window_start', 30)  # hands
-        min_profit_to_lock = getattr(session_overrides, 'min_profit_to_lock', 5)   # units
-        trailing_drop_pct = getattr(session_overrides, 'trailing_drop_pct', 0.25)  # 25%
-
         state = BaccaratSessionState(tier=tier, overrides=session_overrides)
         state.current_shoe = 1
         volume = 0
-        session_peak_profit = 0.0
-        hands_played_total = 0
-        exit_reason = None
-
+        
         while state.current_shoe <= overrides.shoes_per_session and state.mode.name != 'STOPPED':
             decision = BaccaratStrategist.get_next_decision(state)
             if decision['mode'].name == 'STOPPED': break
-
+            
             amt = decision['bet_amount']
             volume += amt
-            hands_played_total += 1
-
+            
             # Simulation Physics
             is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            won = (random.random() < 0.5)
-
+            won = (random.random() < 0.5) 
+            
             pnl = 0
             if won:
                 pnl = amt * 0.95 if is_banker else amt
             else:
                 pnl = -amt
-
+                
             BaccaratStrategist.update_state_after_hand(state, won, pnl)
-
-            # --- SMART TRAILING STOP LOGIC ---
-            current_profit = state.session_pnl
-            if current_profit > session_peak_profit:
-                session_peak_profit = current_profit
-
-            if (
-                smart_exit_enabled and
-                hands_played_total >= smart_window_start
-            ):
-                min_lock_threshold = min_profit_to_lock * base_bet
-                if current_profit >= min_lock_threshold:
-                    dynamic_floor = session_peak_profit * (1.0 - trailing_drop_pct)
-                    if current_profit <= dynamic_floor:
-                        from engine.strategy_rules import PlayMode
-                        state.mode = PlayMode.STOPPED
-                        exit_reason = 'SMART_TRAILING'
-                        break
-
+            
             if state.hands_played_in_shoe >= 70:
                 state.current_shoe += 1
                 state.hands_played_in_shoe = 0
 
         # Determine exit reason
-        if exit_reason is None:
-            exit_reason = 'TIME_LIMIT'
-            if state.mode.name == 'STOPPED':
-                stop_val = -(overrides.stop_loss_units * tier.base_unit)
-                target_val = overrides.profit_lock_units * tier.base_unit
-                if state.session_pnl <= stop_val:
-                    exit_reason = 'STOP_LOSS'
-                elif state.session_pnl >= target_val:
-                    exit_reason = 'TARGET'
-                elif state.session_pnl <= state.locked_profit:
-                    exit_reason = 'RATCHET'
+        exit_reason = 'TIME_LIMIT'
+        if state.mode.name == 'STOPPED':
+            stop_val = -(overrides.stop_loss_units * tier.base_unit)
+            target_val = overrides.profit_lock_units * tier.base_unit
+            if state.session_pnl <= stop_val:
+                exit_reason = 'STOP_LOSS'
+            elif state.session_pnl >= target_val:
+                exit_reason = 'TARGET'
+            elif state.session_pnl <= state.locked_profit:
+                exit_reason = 'RATCHET'
 
-        return state.session_pnl, volume, tier.level, hands_played_total, exit_reason, state.current_press_streak, session_peak_profit
+        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -157,7 +128,7 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands, exit_reason, final_streak, peak_profit = BaccaratWorker.run_session(
+                    pnl, vol, used_level, hands, exit_reason, final_streak = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -179,36 +150,22 @@ class BaccaratWorker:
                             'volume': vol,
                             'tier': used_level,
                             'exit': exit_reason,
-                            'streak_max': final_streak,
-                            # Extra fields for parity with Roulette sim
-                            'spice_cnt': 0,  # Not used in Baccarat
-                            'spice_pl': 0,   # Not used in Baccarat
-                            'tp_boosts': 0,  # Not used in Baccarat
-                            'caroline_max': 0,  # Not used in Baccarat
-                            'dalembert_max': 0, # Not used in Baccarat
-                            'peak_profit': peak_profit
+                            'streak_max': final_streak
                         })
             else:
-                if track_y1_details and m < 12:
-                    y1_log.append({
-                        'month': m + 1,
-                        'session': 0,
-                        'result': 0,
-                        'balance': current_ga,
-                        'game_bal': start_ga + running_play_pnl,
-                        'hands': 0,
-                        'volume': 0,
-                        'tier': 0,
-                        'exit': 'INSOLVENT',
-                        'streak_max': 0,
-                        # Extra fields for parity with Roulette sim
-                        'spice_cnt': 0,
-                        'spice_pl': 0,
-                        'tp_boosts': 0,
-                        'caroline_max': 0,
-                        'dalembert_max': 0,
-                        'peak_profit': 0
-                    })
+                 if track_y1_details and m < 12:
+                        y1_log.append({
+                            'month': m + 1,
+                            'session': 0,
+                            'result': 0,
+                            'balance': current_ga,
+                            'game_bal': start_ga + running_play_pnl,
+                            'hands': 0,
+                            'volume': 0,
+                            'tier': 0,
+                            'exit': 'INSOLVENT',
+                            'streak_max': 0
+                        })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
@@ -427,9 +384,7 @@ def show_simulator():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                # Smart Trailing Stop config (defaults)
-                smart_exit_enabled=True, smart_window_start=30, min_profit_to_lock=5, trailing_drop_pct=0.25
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
             )
 
             start_ga = config['start_ga']
@@ -534,40 +489,37 @@ def show_simulator():
                         table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
                     ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
-            with report_container:
-                report_container.clear()
-                lines = ["=== BACCARAT CONFIGURATION ==="]
-                lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-                lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
-                lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
-                lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
-                lines.append(f"Smart Trailing Stop: {overrides.smart_exit_enabled} (Window: Hand {overrides.smart_window_start}, Min Lock: {overrides.min_profit_to_lock}u, Drop: {overrides.trailing_drop_pct*100:.0f}%)")
-                lines.append("\n=== PERFORMANCE RESULTS ===")
-                lines.append(f"Total Survival Rate: {score_survival:.1f}%")
-                lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
-                lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
-                lines.append(f"Active Play Time: {active_pct:.1f}%")
-                
-                if y1_log:
-                    lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
-                    # Full baccarat export fields from CSV_DATA_DICTIONARY.md
-                    lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Peak_Profit")
-                    for e in y1_log:
-                        # Use .get with defaults for robustness
-                        lines.append(
-                            f"{e.get('month','')},{e.get('session','')},{e.get('result',0):.0f},{e.get('balance',0):.0f},{e.get('game_bal',0):.0f},"
-                            f"{e.get('hands',0)},{e.get('volume',0):.0f},{e.get('tier','')},{e.get('exit','')},{e.get('streak_max',0)},{e.get('peak_profit',0):.0f}"
-                        )
-                
-                # SAFE STRING FORMATTING FOR REPORT
-                log_content = "\n".join(lines)
-                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
+        with report_container:
+            report_container.clear()
+            lines = ["=== BACCARAT CONFIGURATION ==="]
+            lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
+            lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
+            lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
+            lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+            lines.append("\n=== PERFORMANCE RESULTS ===")
+            lines.append(f"Total Survival Rate: {score_survival:.1f}%")
+            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
+            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+            lines.append(f"Active Play Time: {active_pct:.1f}%")
+            
+            if y1_log:
+                lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
+                lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max")
+                for e in y1_log:
+                    lines.append(
+                        f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
+                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']}"
+                    )
+            
+            # SAFE STRING FORMATTING FOR REPORT
+            log_content = "\n".join(lines)
+            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
-
-
+        
+        with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
             
             # STRATEGY LIBRARY RESTORED HERE
             with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
@@ -621,11 +573,6 @@ def show_simulator():
                         slider_insolvency = ui.slider(min=0, max=5000, value=1000); ui.label().bind_text_from(slider_insolvency, 'value', lambda v: f'Floor €{v}')
                         slider_tax_thresh = ui.slider(min=5000, max=50000, value=12500); ui.label().bind_text_from(slider_tax_thresh, 'value', lambda v: f'Tax Thresh €{v}')
                         slider_tax_rate = ui.slider(min=5, max=50, value=25)
-
-                    # Smart Trailing Toggle (move out of eco settings)
-                    with ui.row().classes('w-full justify-between mt-2'):
-                        ui.label('Smart Trailing Stop').classes('text-xs text-slate-400')
-                        smart_trailing_toggle = ui.switch('Enable', value=True).classes('ml-2')
 
                 with ui.column():
                     ui.label('BACCARAT GAMEPLAY').classes('font-bold text-cyan-400')
