@@ -99,8 +99,8 @@ class CareerManager:
             
             for _ in range(sessions_this_month):
                 if game_type == 'Roulette':
-                    # --- ROULETTE ENGINE (returns 9 values) ---
-                    pnl, vol, used_lvl, spins, spice_stats, exit_reason, max_caroline, max_dalembert, press_streak = RouletteWorker.run_session(
+                    # --- ROULETTE ENGINE (returns 10 values) ---
+                    pnl, vol, used_lvl, spins, spice_stats, exit_reason, max_caroline, max_dalembert, press_streak, peak_profit = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
@@ -400,7 +400,7 @@ def show_career_mode():
                 
                 select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
                 ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
-                slider_target = ui.slider(min=5000, max=100000, step=1000, value=10000).props('color=yellow')
+                slider_target = ui.slider(min=2000, max=100000, step=1000, value=10000).props('color=yellow')
                 ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
                 
                 ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
