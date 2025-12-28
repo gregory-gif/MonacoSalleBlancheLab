@@ -258,6 +258,53 @@ def show_sessions_sim():
                             'domLayout': 'autoHeight'
                         }).classes('w-full theme-balham-dark')
                     
+                    # CSV Export for AI Analysis
+                    with ui.card().classes('w-full bg-slate-900 p-4 mb-4'):
+                        ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
+                        ui.label('Copy this data to paste into AI model strategist').classes('text-xs text-slate-500 mb-2')
+                        
+                        # Generate detailed CSV
+                        csv_lines = []
+                        csv_lines.append('Session,Game,Strategy,PNL,Bankroll_After,Final_Bankroll,Net_Profit,Win')
+                        for res in all_results:
+                            session_num = res['session']
+                            final_bankroll = res['final_bankroll']
+                            net_profit = final_bankroll - start_bankroll
+                            win = 1 if net_profit > 0 else 0
+                            
+                            for entry in res['log']:
+                                csv_lines.append(f"{session_num},{entry['game']},{entry['strategy']},{entry['result']:.2f},{entry['bankroll']:.2f},{final_bankroll:.2f},{net_profit:.2f},{win}")
+                        
+                        csv_text = '\n'.join(csv_lines)
+                        csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
+                        
+                        def copy_csv():
+                            ui.run_javascript(f'navigator.clipboard.writeText(`{csv_text}`)')
+                            ui.notify('CSV copied to clipboard!', type='positive')
+                        
+                        ui.button('COPY CSV', on_click=copy_csv).props('icon=content_copy color=yellow').classes('w-full mt-2')
+                        
+                        # Summary statistics CSV
+                        ui.label('SUMMARY STATISTICS CSV').classes('text-xs font-bold text-slate-400 mt-4 mb-2')
+                        summary_csv = f"""Metric,Value
+Total_Sessions,{len(all_results)}
+Start_Bankroll,{start_bankroll:.2f}
+Avg_Final_Bankroll,{avg_final:.2f}
+Min_Final_Bankroll,{min_final:.2f}
+Max_Final_Bankroll,{max_final:.2f}
+Win_Sessions,{profit_sessions}
+Loss_Sessions,{loss_sessions}
+Win_Rate,{(profit_sessions/len(all_results)*100):.2f}
+Total_Profit,{total_profit:.2f}
+Avg_Profit_Per_Session,{avg_profit_per_session:.2f}"""
+                        summary_area = ui.textarea(value=summary_csv).classes('w-full font-mono text-xs').props('rows=12 readonly')
+                        
+                        def copy_summary():
+                            ui.run_javascript(f'navigator.clipboard.writeText(`{summary_csv}`)')
+                            ui.notify('Summary CSV copied!', type='positive')
+                        
+                        ui.button('COPY SUMMARY', on_click=copy_summary).props('icon=content_copy color=cyan').classes('w-full mt-2')
+                    
                     # Strategy breakdown per session (expandable)
                     with ui.card().classes('w-full bg-slate-900 p-4'):
                         ui.label('STRATEGY BREAKDOWN BY SESSION').classes('text-sm font-bold text-white mb-2')

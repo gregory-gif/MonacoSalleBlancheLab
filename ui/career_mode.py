@@ -409,6 +409,71 @@ def show_career_mode():
 
                 ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
 
+                # CSV Export for AI Analysis
+                with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
+                    ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
+                    ui.label('Copy this data to paste into AI model strategist').classes('text-xs text-slate-500 mb-2')
+                    
+                    # Generate detailed CSV with all simulations
+                    csv_lines = []
+                    csv_lines.append('Simulation,Month,Bankroll,Survival_Rate,Median_Monthly_Cost,Avg_Monthly_Cost')
+                    for sim_idx, res in enumerate(valid_results, 1):
+                        for month_idx, bankroll in enumerate(res['trajectory'], 1):
+                            csv_lines.append(f"{sim_idx},{month_idx},{bankroll:.2f},{survival_rate:.2f},{med_cost:.2f},{avg_cost:.2f}")
+                    
+                    csv_text = '\\n'.join(csv_lines)
+                    csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
+                    
+                    def copy_career_csv():
+                        ui.run_javascript(f'navigator.clipboard.writeText(`{csv_text}`)')
+                        ui.notify('Career CSV copied to clipboard!', type='positive')
+                    
+                    ui.button('COPY CSV', on_click=copy_career_csv).props('icon=content_copy color=yellow').classes('w-full mt-2')
+                    
+                    # Summary statistics CSV
+                    ui.label('CAREER SUMMARY CSV').classes('text-xs font-bold text-slate-400 mt-4 mb-2')
+                    final_bankrolls = [r['final'] for r in valid_results]
+                    career_summary_csv = f"""Metric,Value
+Total_Simulations,{len(valid_results)}
+Start_GA,{start_ga:.2f}
+Years,{years}
+Sessions_Per_Year,{sessions}
+Survival_Rate,{survival_rate:.2f}
+Median_Final_Bankroll,{np.median(final_bankrolls):.2f}
+Avg_Final_Bankroll,{np.mean(final_bankrolls):.2f}
+Min_Final_Bankroll,{np.min(final_bankrolls):.2f}
+Max_Final_Bankroll,{np.max(final_bankrolls):.2f}
+Median_Monthly_Cost,{med_cost:.2f}
+Avg_Monthly_Cost,{avg_cost:.2f}
+Total_Months,{years * 12}
+Fallback_Threshold,{slider_fallback.value}
+Promotion_Buffer,{slider_promotion_buffer.value}"""
+                    
+                    career_summary_area = ui.textarea(value=career_summary_csv).classes('w-full font-mono text-xs').props('rows=15 readonly')
+                    
+                    def copy_career_summary():
+                        ui.run_javascript(f'navigator.clipboard.writeText(`{career_summary_csv}`)')
+                        ui.notify('Career summary copied!', type='positive')
+                    
+                    ui.button('COPY SUMMARY', on_click=copy_career_summary).props('icon=content_copy color=cyan').classes('w-full mt-2')
+                    
+                    # Event log CSV
+                    ui.label('EVENT LOG CSV (Sim #1)').classes('text-xs font-bold text-slate-400 mt-4 mb-2')
+                    event_csv_lines = ['Month,Event,Details']
+                    for l in sim1_log:
+                        # Escape commas in details
+                        details = l['details'].replace(',', ';')
+                        event_csv_lines.append(f"{l['month']},{l['event']},{details}")
+                    event_csv = '\\n'.join(event_csv_lines)
+                    
+                    event_csv_area = ui.textarea(value=event_csv).classes('w-full font-mono text-xs').props('rows=8 readonly')
+                    
+                    def copy_event_log():
+                        ui.run_javascript(f'navigator.clipboard.writeText(`{event_csv}`)')
+                        ui.notify('Event log copied!', type='positive')
+                    
+                    ui.button('COPY EVENT LOG', on_click=copy_event_log).props('icon=content_copy color=purple').classes('w-full mt-2')
+
                 with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
                     for l in sim1_log:
                         color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
