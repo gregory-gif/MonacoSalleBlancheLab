@@ -415,7 +415,19 @@ def show_career_mode():
                     ui.label('Condensed data - Sim #1 trajectory + all final results').classes('text-xs text-slate-500 mb-2')
                     
                     # Generate condensed CSV - Only Sim #1 monthly trajectory
+                    # Get ecosystem settings from first leg
+                    first_leg_cfg = sequence_config[0]['config']
+                    contrib_win = first_leg_cfg.get('eco_win', 300)
+                    contrib_loss = first_leg_cfg.get('eco_loss', 300)
+                    
                     csv_lines = []
+                    csv_lines.append('# CAREER SETTINGS')
+                    csv_lines.append(f'Start_GA,{start_ga:.2f}')
+                    csv_lines.append(f'Monthly_Contrib_Win,{contrib_win:.2f}')
+                    csv_lines.append(f'Monthly_Contrib_Loss,{contrib_loss:.2f}')
+                    csv_lines.append(f'Years,{years}')
+                    csv_lines.append(f'Sessions_Per_Year,{sessions}')
+                    csv_lines.append('')
                     csv_lines.append('# SIM #1 MONTHLY TRAJECTORY')
                     csv_lines.append('Month,Bankroll')
                     for month_idx, bankroll in enumerate(sim1_traj, 1):
@@ -452,9 +464,14 @@ def show_career_mode():
                     # Summary statistics CSV
                     ui.label('CAREER SUMMARY CSV').classes('text-xs font-bold text-slate-400 mt-4 mb-2')
                     final_bankrolls = [r['final'] for r in valid_results]
+                    first_leg_cfg = sequence_config[0]['config']
+                    contrib_win = first_leg_cfg.get('eco_win', 300)
+                    contrib_loss = first_leg_cfg.get('eco_loss', 300)
                     career_summary_csv = f"""Metric,Value
 Total_Simulations,{len(valid_results)}
 Start_GA,{start_ga:.2f}
+Monthly_Contrib_Win,{contrib_win:.2f}
+Monthly_Contrib_Loss,{contrib_loss:.2f}
 Years,{years}
 Sessions_Per_Year,{sessions}
 Survival_Rate,{survival_rate:.2f}
