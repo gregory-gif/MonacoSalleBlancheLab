@@ -54,6 +54,15 @@ def show_sessions_sim():
             ui.label().bind_text_from(slider_start_bankroll, 'value', lambda v: f'Starting Bankroll: €{v:,.0f}')
             slider_num_sessions = ui.slider(min=1, max=500, value=20).props('color=cyan')
             ui.label().bind_text_from(slider_num_sessions, 'value', lambda v: f'{v} Sessions')
+            
+            ui.separator().classes('bg-slate-700 my-4')
+            ui.label('💰 BETWEEN-SESSION CONTRIBUTIONS').classes('text-xs font-bold text-green-400 mb-2')
+            switch_contributions = ui.switch('Enable Contributions').props('color=green')
+            switch_contributions.value = False
+            slider_contrib_win = ui.slider(min=0, max=1000, value=300, step=50).props('color=green')
+            ui.label().bind_text_from(slider_contrib_win, 'value', lambda v: f'After Win: +€{v:,.0f}')
+            slider_contrib_loss = ui.slider(min=0, max=1000, value=300, step=50).props('color=green')
+            ui.label().bind_text_from(slider_contrib_loss, 'value', lambda v: f'After Loss: +€{v:,.0f}')
 
         # Results area placeholder
         results_area = ui.column().classes('w-full mt-8')
@@ -78,9 +87,14 @@ def show_sessions_sim():
                 
                 def run_all_sessions():
                     all_results = []
+                    bankroll = start_bankroll
+                    use_contributions = switch_contributions.value
+                    contrib_win = slider_contrib_win.value
+                    contrib_loss = slider_contrib_loss.value
+                    
                     for s in range(num_sessions):
                         session_log = []
-                        bankroll = start_bankroll
+                        starting_bankroll_this_session = bankroll
                         for strat in session_strategies:
                             strat_cfg = saved_strats.get(strat['strategy'])
                             if not strat_cfg:
@@ -133,7 +147,15 @@ def show_sessions_sim():
                             bankroll += pnl
                             session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': bankroll})
                         
-                        all_results.append({'session': s+1, 'final_bankroll': bankroll, 'log': session_log})
+                        # Apply contribution after session (if enabled)
+                        session_profit = bankroll - starting_bankroll_this_session
+                        if use_contributions and s < num_sessions - 1:  # Don't add contribution after last session
+                            if session_profit > 0:
+                                bankroll += contrib_win
+                            else:
+                                bankroll += contrib_loss
+                        
+                        all_results.append({'session': s+1, 'final_bankroll': bankroll, 'log': session_log, 'contribution': (contrib_win if session_profit > 0 else contrib_loss) if use_contributions and s < num_sessions - 1 else 0})
                     return all_results
                 
                 # Run in thread
@@ -289,6 +311,9 @@ def show_sessions_sim():
                         summary_csv = f"""Metric,Value
 Total_Sessions,{len(all_results)}
 Start_Bankroll,{start_bankroll:.2f}
+Contributions_Enabled,{switch_contributions.value}
+Contrib_After_Win,{slider_contrib_win.value:.2f}
+Contrib_After_Loss,{slider_contrib_loss.value:.2f}
 Avg_Final_Bankroll,{avg_final:.2f}
 Min_Final_Bankroll,{min_final:.2f}
 Max_Final_Bankroll,{max_final:.2f}
