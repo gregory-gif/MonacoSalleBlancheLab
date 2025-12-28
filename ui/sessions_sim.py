@@ -223,8 +223,9 @@ def show_sessions_sim():
                 final_game_bankroll = all_results[-1]['game_bankroll']
                 final_game_account = all_results[-1]['game_account']
                 
-                # Pure game profit (no contributions) - this is B_end - SB
-                total_game_profit = final_game_bankroll - start_bankroll
+                # Pure game profit = SUM of all session PnLs (NOT final_bankroll - start)
+                # because game_bankroll gets topped up from GA savings
+                total_game_profit = sum(pure_session_pnls)
                 avg_game_profit = np.mean(pure_session_pnls)
                 
                 # Verify GA formula: GA_end should equal SB + C + P
