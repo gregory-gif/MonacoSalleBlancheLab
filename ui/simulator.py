@@ -623,7 +623,7 @@ def show_simulator():
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Start Window').classes('text-xs text-slate-400')
                         lbl_smart_window = ui.label()
-                    slider_smart_window = ui.slider(min=150, max=240, value=190, step=10).props('color=yellow')
+                    slider_smart_window = ui.slider(min=10, max=240, value=190, step=10).props('color=yellow')
                     lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Hand {int(v)}')
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
