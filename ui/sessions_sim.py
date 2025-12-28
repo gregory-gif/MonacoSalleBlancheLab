@@ -56,7 +56,8 @@ def show_sessions_sim():
             ui.label().bind_text_from(slider_num_sessions, 'value', lambda v: f'{v} Sessions')
             
             ui.separator().classes('bg-slate-700 my-4')
-            ui.label('💰 BETWEEN-SESSION CONTRIBUTIONS').classes('text-xs font-bold text-green-400 mb-2')
+            ui.label('💰 LADDER MECHANISM (GA → Bankroll Top-Up)').classes('text-xs font-bold text-green-400 mb-2')
+            ui.label('Contributions go to Game Account, then auto-replenish casino bankroll').classes('text-xs text-slate-400 mb-2')
             switch_contributions = ui.switch('Enable Contributions').props('color=green')
             switch_contributions.value = False
             slider_contrib_win = ui.slider(min=0, max=1000, value=300, step=50).props('color=green')
@@ -87,16 +88,37 @@ def show_sessions_sim():
                 
                 def run_all_sessions():
                     all_results = []
-                    game_bankroll = start_bankroll  # Pure casino money
-                    game_account = start_bankroll   # GA = Start + contributions + game profit
+                    game_bankroll = start_bankroll  # Money in casino wallet
+                    game_account = start_bankroll   # GA = total wealth (savings + casino wallet)
                     total_contributions = 0
                     use_contributions = switch_contributions.value
                     contrib_win = slider_contrib_win.value
                     contrib_loss = slider_contrib_loss.value
                     insolvency_floor = 0  # Cannot go below zero
+                    target_bankroll = start_bankroll  # Target to maintain in casino wallet
                     
                     for s in range(num_sessions):
-                        # INSOLVENCY CHECK - Cannot play if bankroll is at/below floor
+                        # STEP 1: Add contribution to GA (total wealth increases)
+                        contribution_this_session = 0
+                        if use_contributions:
+                            # Determine contribution based on PREVIOUS session result
+                            if s == 0 or all_results[-1]['pure_session_pnl'] > 0:
+                                contribution_this_session = contrib_win
+                            else:
+                                contribution_this_session = contrib_loss
+                            game_account += contribution_this_session
+                            total_contributions += contribution_this_session
+                        
+                        # STEP 2: Top-up game_bankroll from GA savings if needed
+                        available_savings = game_account - game_bankroll  # Money not in casino
+                        if game_bankroll < target_bankroll and available_savings > 0:
+                            # Transfer from savings to casino wallet
+                            needed = target_bankroll - game_bankroll
+                            topup = min(needed, available_savings)
+                            game_bankroll += topup
+                            # Note: GA total doesn't change (just moving money between accounts)
+                        
+                        # STEP 3: INSOLVENCY CHECK - Cannot play if bankroll is at/below floor
                         if game_bankroll <= insolvency_floor:
                             # Record insolvent session
                             all_results.append({
@@ -104,7 +126,7 @@ def show_sessions_sim():
                                 'game_bankroll': game_bankroll,
                                 'pure_session_pnl': 0,
                                 'game_account': game_account,
-                                'contribution': 0,
+                                'contribution': contribution_this_session,
                                 'log': [{'game': 'INSOLVENT', 'strategy': 'NO PLAY', 'result': 0, 'bankroll': game_bankroll}],
                                 'total_contributions_so_far': total_contributions,
                                 'is_insolvent': True
@@ -172,24 +194,15 @@ def show_sessions_sim():
                         # Calculate pure session PnL (no contributions)
                         session_pnl = game_bankroll - starting_bankroll_this_session
                         
-                        # Update GA with game profit/loss FIRST
+                        # STEP 4: Update GA with game profit/loss (total wealth changed due to casino results)
                         game_account += session_pnl
-                        
-                        # Then apply contribution to GA
-                        contribution_this_session = 0
-                        if use_contributions:
-                            if session_pnl > 0:
-                                contribution_this_session = contrib_win
-                            else:
-                                contribution_this_session = contrib_loss
-                            game_account += contribution_this_session
-                            total_contributions += contribution_this_session
+                        # Note: contribution was already added at start of session
                         
                         all_results.append({
                             'session': s+1, 
-                            'game_bankroll': game_bankroll,  # Pure game bankroll (clamped at floor)
+                            'game_bankroll': game_bankroll,  # Money in casino wallet (clamped at floor)
                             'pure_session_pnl': session_pnl,  # Pure game result
-                            'game_account': game_account,  # GA = Start + Contributions + Game Profit
+                            'game_account': game_account,  # GA = total wealth (SB + C + P)
                             'contribution': contribution_this_session,
                             'log': session_log,
                             'total_contributions_so_far': total_contributions,
@@ -239,8 +252,11 @@ def show_sessions_sim():
                     # Summary Cards
                     with ui.row().classes('w-full gap-4 mb-4'):
                         with ui.card().classes('flex-1 bg-slate-800 p-4'):
-                            ui.label('TOTAL SESSIONS').classes('text-xs text-slate-500 font-bold')
-                            ui.label(f'{len(all_results)}').classes('text-3xl font-bold text-white')
+                            ui.label('FINAL GA').classes('text-xs text-slate-500 font-bold')
+                            ga_color = 'text-green-400' if final_game_account > start_bankroll else 'text-red-400'
+                            ui.label(f'€{final_game_account:,.0f}').classes(f'text-3xl font-bold {ga_color}')
+                            savings = final_game_account - final_game_bankroll
+                            ui.label(f'Bankroll: €{final_game_bankroll:,.0f} | Savings: €{savings:,.0f}').classes('text-xs text-slate-500')
                         
                         with ui.card().classes('flex-1 bg-slate-800 p-4'):
                             ui.label('PURE GAME PROFIT').classes('text-xs text-slate-500 font-bold')
