@@ -87,18 +87,21 @@ def show_sessions_sim():
                 
                 def run_all_sessions():
                     all_results = []
-                    bankroll = start_bankroll
+                    game_bankroll = start_bankroll  # Pure casino money
+                    game_account = start_bankroll   # GA = Start + all contributions
+                    total_contributions = 0
                     use_contributions = switch_contributions.value
                     contrib_win = slider_contrib_win.value
                     contrib_loss = slider_contrib_loss.value
                     
                     for s in range(num_sessions):
                         session_log = []
-                        starting_bankroll_this_session = bankroll
+                        starting_bankroll_this_session = game_bankroll
+                        
                         for strat in session_strategies:
                             strat_cfg = saved_strats.get(strat['strategy'])
                             if not strat_cfg:
-                                session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': 'NOT FOUND', 'bankroll': bankroll})
+                                session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': 'NOT FOUND', 'bankroll': game_bankroll})
                                 continue
                             
                             # Create overrides from saved config
@@ -140,41 +143,64 @@ def show_sessions_sim():
                             
                             # Simulate
                             if strat['game'] == 'Roulette':
-                                pnl, *_ = RouletteWorker.run_session(bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
+                                pnl, *_ = RouletteWorker.run_session(game_bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
                             else:
-                                pnl, *_ = BaccaratWorker.run_session(bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
+                                pnl, *_ = BaccaratWorker.run_session(game_bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
                             
-                            bankroll += pnl
-                            session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': bankroll})
+                            # Update ONLY game bankroll with pure PnL
+                            game_bankroll += pnl
+                            session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': game_bankroll})
                         
-                        # Apply contribution after session (if enabled)
-                        session_profit = bankroll - starting_bankroll_this_session
-                        if use_contributions and s < num_sessions - 1:  # Don't add contribution after last session
-                            if session_profit > 0:
-                                bankroll += contrib_win
+                        # Calculate pure session PnL (no contributions)
+                        session_pnl = game_bankroll - starting_bankroll_this_session
+                        
+                        # Apply contribution to GA ONLY (not to game bankroll)
+                        contribution_this_session = 0
+                        if use_contributions:
+                            if session_pnl > 0:
+                                contribution_this_session = contrib_win
                             else:
-                                bankroll += contrib_loss
+                                contribution_this_session = contrib_loss
+                            game_account += contribution_this_session
+                            total_contributions += contribution_this_session
+                            
+                            # DO NOT inject into game_bankroll - keep them separate!
                         
-                        all_results.append({'session': s+1, 'final_bankroll': bankroll, 'log': session_log, 'contribution': (contrib_win if session_profit > 0 else contrib_loss) if use_contributions and s < num_sessions - 1 else 0})
-                    return all_results
+                        all_results.append({
+                            'session': s+1, 
+                            'game_bankroll': game_bankroll,  # Pure game bankroll - NO contributions mixed in
+                            'pure_session_pnl': session_pnl,  # Pure game result
+                            'game_account': game_account,  # GA = Start + all contributions
+                            'contribution': contribution_this_session,
+                            'log': session_log,
+                            'total_contributions_so_far': total_contributions
+                        })
+                    return all_results, total_contributions
                 
                 # Run in thread
-                all_results = await asyncio.to_thread(run_all_sessions)
+                all_results, total_contributions = await asyncio.to_thread(run_all_sessions)
                 
                 # Update progress
                 progress_bar.set_value(1.0)
                 status_label.set_text('Simulation complete!')
                 progress_bar.set_visibility(False)
                 
-                # Calculate statistics
-                final_bankrolls = [r['final_bankroll'] for r in all_results]
-                avg_final = np.mean(final_bankrolls)
-                min_final = np.min(final_bankrolls)
-                max_final = np.max(final_bankrolls)
-                profit_sessions = len([b for b in final_bankrolls if b > start_bankroll])
-                loss_sessions = len([b for b in final_bankrolls if b <= start_bankroll])
-                total_profit = sum([b - start_bankroll for b in final_bankrolls])
-                avg_profit_per_session = total_profit / len(final_bankrolls)
+                # Calculate statistics - PURE GAME RESULTS
+                pure_session_pnls = [r['pure_session_pnl'] for r in all_results]
+                final_game_bankroll = all_results[-1]['game_bankroll']
+                final_game_account = all_results[-1]['game_account']
+                
+                # Pure game profit (no contributions)
+                total_game_profit = sum(pure_session_pnls)
+                avg_game_profit = np.mean(pure_session_pnls)
+                
+                # Win rate based on pure session PnL
+                profit_sessions = len([p for p in pure_session_pnls if p > 0])
+                loss_sessions = len([p for p in pure_session_pnls if p <= 0])
+                
+                # Financial metrics
+                net_result = total_game_profit + total_contributions
+                monthly_cost = (total_contributions + start_bankroll - final_game_bankroll) / len(all_results) if len(all_results) > 0 else 0
                 
                 # Display results
                 results_area.clear()
@@ -188,8 +214,10 @@ def show_sessions_sim():
                             ui.label(f'{len(all_results)}').classes('text-3xl font-bold text-white')
                         
                         with ui.card().classes('flex-1 bg-slate-800 p-4'):
-                            ui.label('AVG FINAL BANKROLL').classes('text-xs text-slate-500 font-bold')
-                            ui.label(f'€{avg_final:,.0f}').classes('text-3xl font-bold text-cyan-400')
+                            ui.label('PURE GAME PROFIT').classes('text-xs text-slate-500 font-bold')
+                            color = 'text-green-400' if total_game_profit > 0 else 'text-red-400'
+                            ui.label(f'€{total_game_profit:,.0f}').classes(f'text-3xl font-bold {color}')
+                            ui.label(f'Avg: €{avg_game_profit:,.0f}/sess').classes('text-xs text-slate-500')
                         
                         with ui.card().classes('flex-1 bg-slate-800 p-4'):
                             ui.label('WIN RATE').classes('text-xs text-slate-500 font-bold')
@@ -199,26 +227,27 @@ def show_sessions_sim():
                             ui.label(f'{profit_sessions}W / {loss_sessions}L').classes('text-xs text-slate-500')
                         
                         with ui.card().classes('flex-1 bg-slate-800 p-4'):
-                            ui.label('NET P/L').classes('text-xs text-slate-500 font-bold')
-                            pl_color = 'text-green-400' if total_profit > 0 else 'text-red-400'
-                            ui.label(f'€{total_profit:,.0f}').classes(f'text-3xl font-bold {pl_color}')
-                            ui.label(f'Avg: €{avg_profit_per_session:,.0f}/sess').classes('text-xs text-slate-500')
+                            ui.label('MONTHLY COST').classes('text-xs text-slate-500 font-bold')
+                            cost_color = 'text-red-400' if monthly_cost > 0 else 'text-green-400'
+                            ui.label(f'€{monthly_cost:,.0f}').classes(f'text-3xl font-bold {cost_color}')
+                            ui.label(f'Contrib: €{total_contributions:,.0f}').classes('text-xs text-slate-500')
                     
-                    # Bankroll progression chart
+                    # Bankroll progression chart - PURE GAME RESULTS
                     with ui.card().classes('w-full bg-slate-900 p-4 mb-4'):
-                        ui.label('BANKROLL PROGRESSION').classes('text-sm font-bold text-white mb-2')
+                        ui.label('PURE GAME BANKROLL (No Contributions in Curve)').classes('text-sm font-bold text-yellow-400 mb-2')
                         
                         sessions = [r['session'] for r in all_results]
-                        bankrolls = [r['final_bankroll'] for r in all_results]
+                        # Plot pure game bankroll progression (contributions already injected for next session)
+                        game_bankrolls = [r['game_bankroll'] for r in all_results]
                         
                         fig = go.Figure()
                         
-                        # Line chart
+                        # Game bankroll line
                         fig.add_trace(go.Scatter(
                             x=sessions, 
-                            y=bankrolls,
+                            y=game_bankrolls,
                             mode='lines+markers',
-                            name='Bankroll',
+                            name='Game Bankroll',
                             line=dict(color='#22d3ee', width=2),
                             marker=dict(size=6, color='#22d3ee')
                         ))
@@ -229,15 +258,6 @@ def show_sessions_sim():
                             line_dash="dash",
                             line_color="yellow",
                             annotation_text=f"Start: €{start_bankroll:,.0f}",
-                            annotation_position="right"
-                        )
-                        
-                        # Average line
-                        fig.add_hline(
-                            y=avg_final,
-                            line_dash="dot",
-                            line_color="white",
-                            annotation_text=f"Avg: €{avg_final:,.0f}",
                             annotation_position="right"
                         )
                         
@@ -259,22 +279,25 @@ def show_sessions_sim():
                         ui.label('DETAILED SESSION RESULTS').classes('text-sm font-bold text-white mb-2')
                         table_rows = []
                         for res in all_results:
-                            profit = res['final_bankroll'] - start_bankroll
-                            profit_str = f"+€{profit:,.0f}" if profit >= 0 else f"€{profit:,.0f}"
-                            result = '✅ WIN' if profit > 0 else ('➖ BREAK-EVEN' if profit == 0 else '❌ LOSS')
+                            session_pnl = res['pure_session_pnl']
+                            pnl_str = f"+€{session_pnl:,.0f}" if session_pnl >= 0 else f"€{session_pnl:,.0f}"
+                            result = '✅ WIN' if session_pnl > 0 else ('➖ BREAK-EVEN' if session_pnl == 0 else '❌ LOSS')
+                            contrib_str = f"+€{res['contribution']:,.0f}" if res['contribution'] > 0 else "-"
                             table_rows.append({
                                 'Session': res['session'],
-                                'Final': f"€{res['final_bankroll']:,.0f}",
-                                'P/L': profit_str,
+                                'Pure PnL': pnl_str,
+                                'Contribution': contrib_str,
+                                'Final Bankroll': f"€{res['game_bankroll']:,.0f}",
                                 'Result': result
                             })
                         
                         ui.aggrid({
                             'columnDefs': [
                                 {'headerName': '#', 'field': 'Session', 'width': 60},
-                                {'headerName': 'Final Bankroll', 'field': 'Final', 'width': 140},
-                                {'headerName': 'Profit/Loss', 'field': 'P/L', 'width': 120},
-                                {'headerName': 'Result', 'field': 'Result', 'width': 120}
+                                {'headerName': 'Pure PnL', 'field': 'Pure PnL', 'width': 100},
+                                {'headerName': 'Contribution', 'field': 'Contribution', 'width': 110},
+                                {'headerName': 'Final Bankroll', 'field': 'Final Bankroll', 'width': 140},
+                                {'headerName': 'Result', 'field': 'Result', 'width': 100}
                             ],
                             'rowData': table_rows,
                             'domLayout': 'autoHeight'
@@ -283,19 +306,18 @@ def show_sessions_sim():
                     # CSV Export for AI Analysis
                     with ui.card().classes('w-full bg-slate-900 p-4 mb-4'):
                         ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
-                        ui.label('Copy this data to paste into AI model strategist').classes('text-xs text-slate-500 mb-2')
+                        ui.label('Pure game PnL separated from contributions').classes('text-xs text-slate-500 mb-2')
                         
                         # Generate detailed CSV
                         csv_lines = []
-                        csv_lines.append('Session,Game,Strategy,PNL,Bankroll_After,Final_Bankroll,Net_Profit,Win')
+                        csv_lines.append('Session,Game,Strategy,Pure_PNL,Bankroll_After,Contribution,Game_Bankroll')
                         for res in all_results:
                             session_num = res['session']
-                            final_bankroll = res['final_bankroll']
-                            net_profit = final_bankroll - start_bankroll
-                            win = 1 if net_profit > 0 else 0
+                            contribution = res['contribution']
+                            game_bankroll = res['game_bankroll']
                             
                             for entry in res['log']:
-                                csv_lines.append(f"{session_num},{entry['game']},{entry['strategy']},{entry['result']:.2f},{entry['bankroll']:.2f},{final_bankroll:.2f},{net_profit:.2f},{win}")
+                                csv_lines.append(f"{session_num},{entry['game']},{entry['strategy']},{entry['result']:.2f},{entry['bankroll']:.2f},{contribution:.2f},{game_bankroll:.2f}")
                         
                         csv_text = '\n'.join(csv_lines)
                         csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
@@ -314,14 +336,16 @@ Start_Bankroll,{start_bankroll:.2f}
 Contributions_Enabled,{switch_contributions.value}
 Contrib_After_Win,{slider_contrib_win.value:.2f}
 Contrib_After_Loss,{slider_contrib_loss.value:.2f}
-Avg_Final_Bankroll,{avg_final:.2f}
-Min_Final_Bankroll,{min_final:.2f}
-Max_Final_Bankroll,{max_final:.2f}
+Total_Contributions,{total_contributions:.2f}
+Final_Game_Bankroll,{final_game_bankroll:.2f}
+Final_Game_Account,{final_game_account:.2f}
+Total_Game_Profit,{total_game_profit:.2f}
+Avg_Game_Profit_Per_Session,{avg_game_profit:.2f}
 Win_Sessions,{profit_sessions}
 Loss_Sessions,{loss_sessions}
 Win_Rate,{(profit_sessions/len(all_results)*100):.2f}
-Total_Profit,{total_profit:.2f}
-Avg_Profit_Per_Session,{avg_profit_per_session:.2f}"""
+Net_Result,{net_result:.2f}
+Monthly_Cost,{monthly_cost:.2f}"""
                         summary_area = ui.textarea(value=summary_csv).classes('w-full font-mono text-xs').props('rows=12 readonly')
                         
                         def copy_summary():
@@ -334,10 +358,12 @@ Avg_Profit_Per_Session,{avg_profit_per_session:.2f}"""
                     with ui.card().classes('w-full bg-slate-900 p-4'):
                         ui.label('STRATEGY BREAKDOWN BY SESSION').classes('text-sm font-bold text-white mb-2')
                         for res in all_results:
-                            profit = res['final_bankroll'] - start_bankroll
-                            profit_color = 'text-green-400' if profit > 0 else 'text-red-400'
+                            pure_pnl = res['pure_session_pnl']
+                            contribution = res['contribution']
+                            pnl_color = 'text-green-400' if pure_pnl > 0 else 'text-red-400'
+                            contrib_str = f" + €{contribution:,.0f} contrib" if contribution > 0 else ""
                             with ui.expansion(
-                                f"Session {res['session']}: €{res['final_bankroll']:,.0f} ({profit:+,.0f})",
+                                f"Session {res['session']}: Pure PnL €{pure_pnl:+,.0f}{contrib_str}",
                                 icon='receipt_long'
                             ).classes('w-full bg-slate-800 text-white'):
                                 for entry in res['log']:
