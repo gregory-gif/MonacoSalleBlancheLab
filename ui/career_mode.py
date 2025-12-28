@@ -412,16 +412,35 @@ def show_career_mode():
                 # CSV Export for AI Analysis
                 with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
                     ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
-                    ui.label('Copy this data to paste into AI model strategist').classes('text-xs text-slate-500 mb-2')
+                    ui.label('Condensed data - Sim #1 trajectory + all final results').classes('text-xs text-slate-500 mb-2')
                     
-                    # Generate detailed CSV with all simulations
+                    # Generate condensed CSV - Only Sim #1 monthly trajectory
                     csv_lines = []
-                    csv_lines.append('Simulation,Month,Bankroll,Survival_Rate,Median_Monthly_Cost,Avg_Monthly_Cost')
-                    for sim_idx, res in enumerate(valid_results, 1):
-                        for month_idx, bankroll in enumerate(res['trajectory'], 1):
-                            csv_lines.append(f"{sim_idx},{month_idx},{bankroll:.2f},{survival_rate:.2f},{med_cost:.2f},{avg_cost:.2f}")
+                    csv_lines.append('# SIM #1 MONTHLY TRAJECTORY')
+                    csv_lines.append('Month,Bankroll')
+                    for month_idx, bankroll in enumerate(sim1_traj, 1):
+                        csv_lines.append(f"{month_idx},{bankroll:.2f}")
                     
-                    csv_text = '\\n'.join(csv_lines)
+                    # Add all simulations final results
+                    csv_lines.append('')
+                    csv_lines.append('# ALL SIMULATIONS FINAL RESULTS')
+                    csv_lines.append('Simulation,Final_Bankroll,Net_Profit,Success')
+                    for sim_idx, res in enumerate(valid_results, 1):
+                        final = res['final']
+                        net = final - start_ga
+                        success = 1 if final > start_ga else 0
+                        csv_lines.append(f"{sim_idx},{final:.2f},{net:.2f},{success}")
+                    
+                    # Add yearly milestones from Sim #1
+                    csv_lines.append('')
+                    csv_lines.append('# SIM #1 YEARLY MILESTONES')
+                    csv_lines.append('Year,Bankroll')
+                    for year in range(years):
+                        month_idx = (year + 1) * 12 - 1
+                        if month_idx < len(sim1_traj):
+                            csv_lines.append(f"{year+1},{sim1_traj[month_idx]:.2f}")
+                    
+                    csv_text = '\n'.join(csv_lines)
                     csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
                     
                     def copy_career_csv():
