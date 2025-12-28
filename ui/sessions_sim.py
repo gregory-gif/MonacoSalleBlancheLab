@@ -88,13 +88,29 @@ def show_sessions_sim():
                 def run_all_sessions():
                     all_results = []
                     game_bankroll = start_bankroll  # Pure casino money
-                    game_account = start_bankroll   # GA = Start + all contributions
+                    game_account = start_bankroll   # GA = Start + contributions + game profit
                     total_contributions = 0
                     use_contributions = switch_contributions.value
                     contrib_win = slider_contrib_win.value
                     contrib_loss = slider_contrib_loss.value
+                    insolvency_floor = 0  # Cannot go below zero
                     
                     for s in range(num_sessions):
+                        # INSOLVENCY CHECK - Cannot play if bankroll is at/below floor
+                        if game_bankroll <= insolvency_floor:
+                            # Record insolvent session
+                            all_results.append({
+                                'session': s+1, 
+                                'game_bankroll': game_bankroll,
+                                'pure_session_pnl': 0,
+                                'game_account': game_account,
+                                'contribution': 0,
+                                'log': [{'game': 'INSOLVENT', 'strategy': 'NO PLAY', 'result': 0, 'bankroll': game_bankroll}],
+                                'total_contributions_so_far': total_contributions,
+                                'is_insolvent': True
+                            })
+                            continue
+                        
                         session_log = []
                         starting_bankroll_this_session = game_bankroll
                         
@@ -147,14 +163,19 @@ def show_sessions_sim():
                             else:
                                 pnl, *_ = BaccaratWorker.run_session(game_bankroll, overrides, tier_map, overrides.ratchet_enabled, overrides.penalty_box_enabled, active_level, mode, base_bet)
                             
-                            # Update ONLY game bankroll with pure PnL
+                            # Update game bankroll with pure PnL
                             game_bankroll += pnl
+                            # ENFORCE INSOLVENCY FLOOR - clamp at minimum
+                            game_bankroll = max(game_bankroll, insolvency_floor)
                             session_log.append({'game': strat['game'], 'strategy': strat['strategy'], 'result': pnl, 'bankroll': game_bankroll})
                         
                         # Calculate pure session PnL (no contributions)
                         session_pnl = game_bankroll - starting_bankroll_this_session
                         
-                        # Apply contribution to GA ONLY (not to game bankroll)
+                        # Update GA with game profit/loss FIRST
+                        game_account += session_pnl
+                        
+                        # Then apply contribution to GA
                         contribution_this_session = 0
                         if use_contributions:
                             if session_pnl > 0:
@@ -163,17 +184,16 @@ def show_sessions_sim():
                                 contribution_this_session = contrib_loss
                             game_account += contribution_this_session
                             total_contributions += contribution_this_session
-                            
-                            # DO NOT inject into game_bankroll - keep them separate!
                         
                         all_results.append({
                             'session': s+1, 
-                            'game_bankroll': game_bankroll,  # Pure game bankroll - NO contributions mixed in
+                            'game_bankroll': game_bankroll,  # Pure game bankroll (clamped at floor)
                             'pure_session_pnl': session_pnl,  # Pure game result
-                            'game_account': game_account,  # GA = Start + all contributions
+                            'game_account': game_account,  # GA = Start + Contributions + Game Profit
                             'contribution': contribution_this_session,
                             'log': session_log,
-                            'total_contributions_so_far': total_contributions
+                            'total_contributions_so_far': total_contributions,
+                            'is_insolvent': False
                         })
                     return all_results, total_contributions
                 
@@ -190,17 +210,26 @@ def show_sessions_sim():
                 final_game_bankroll = all_results[-1]['game_bankroll']
                 final_game_account = all_results[-1]['game_account']
                 
-                # Pure game profit (no contributions)
-                total_game_profit = sum(pure_session_pnls)
+                # Pure game profit (no contributions) - this is B_end - SB
+                total_game_profit = final_game_bankroll - start_bankroll
                 avg_game_profit = np.mean(pure_session_pnls)
+                
+                # Verify GA formula: GA_end should equal SB + C + P
+                expected_ga = start_bankroll + total_contributions + total_game_profit
+                assert abs(final_game_account - expected_ga) < 1e-6, f"GA mismatch: {final_game_account} != {expected_ga}"
                 
                 # Win rate based on pure session PnL
                 profit_sessions = len([p for p in pure_session_pnls if p > 0])
                 loss_sessions = len([p for p in pure_session_pnls if p <= 0])
                 
-                # Financial metrics
-                net_result = total_game_profit + total_contributions
-                monthly_cost = (total_contributions + start_bankroll - final_game_bankroll) / len(all_results) if len(all_results) > 0 else 0
+                # Financial metrics - CORRECTED FORMULAS
+                # Net result = C + P (contributions + game profit)
+                net_result = total_contributions + total_game_profit
+                
+                # True monthly cost = -P / months (cost of pure casino EV)
+                # This MUST NOT change when contributions are toggled on/off
+                months = len(all_results)
+                true_monthly_cost = -total_game_profit / months if months > 0 else 0
                 
                 # Display results
                 results_area.clear()
@@ -228,9 +257,9 @@ def show_sessions_sim():
                         
                         with ui.card().classes('flex-1 bg-slate-800 p-4'):
                             ui.label('MONTHLY COST').classes('text-xs text-slate-500 font-bold')
-                            cost_color = 'text-red-400' if monthly_cost > 0 else 'text-green-400'
-                            ui.label(f'€{monthly_cost:,.0f}').classes(f'text-3xl font-bold {cost_color}')
-                            ui.label(f'Contrib: €{total_contributions:,.0f}').classes('text-xs text-slate-500')
+                            cost_color = 'text-red-400' if true_monthly_cost > 0 else 'text-green-400'
+                            ui.label(f'€{true_monthly_cost:,.0f}').classes(f'text-3xl font-bold {cost_color}')
+                            ui.label(f'Pure EV/month').classes('text-xs text-slate-500')
                     
                     # Bankroll progression chart - PURE GAME RESULTS
                     with ui.card().classes('w-full bg-slate-900 p-4 mb-4'):
@@ -341,11 +370,12 @@ Final_Game_Bankroll,{final_game_bankroll:.2f}
 Final_Game_Account,{final_game_account:.2f}
 Total_Game_Profit,{total_game_profit:.2f}
 Avg_Game_Profit_Per_Session,{avg_game_profit:.2f}
+Net_Result,{net_result:.2f}
+True_Monthly_Cost,{true_monthly_cost:.2f}
 Win_Sessions,{profit_sessions}
 Loss_Sessions,{loss_sessions}
 Win_Rate,{(profit_sessions/len(all_results)*100):.2f}
-Net_Result,{net_result:.2f}
-Monthly_Cost,{monthly_cost:.2f}"""
+Formula_Check,GA={start_bankroll:.2f}+{total_contributions:.2f}+{total_game_profit:.2f}={final_game_account:.2f}"""
                         summary_area = ui.textarea(value=summary_csv).classes('w-full font-mono text-xs').props('rows=12 readonly')
                         
                         def copy_summary():
