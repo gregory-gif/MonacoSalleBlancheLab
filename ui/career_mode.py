@@ -17,7 +17,7 @@ ROULETTE_BETS = {'Red', 'Black', 'Even', 'Odd', '1-18', '19-36'}
 
 class CareerManager:
     @staticmethod
-    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year):
+    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year, fallback_threshold_pct=0.80, promotion_buffer_pct=1.20):
         current_ga = start_ga
         current_leg_idx = 0
         
@@ -37,12 +37,44 @@ class CareerManager:
         
         total_input = start_ga
         
+        # Track thresholds for fallback mechanism
+        promotion_thresholds = [0]  # Track threshold that triggered each leg promotion
+        
         for m in range(months):
-            # 1. CHECK FOR PROMOTION
+            # 1. CHECK FOR DEMOTION (Fallback to previous strategy if bankroll drops too low)
+            if current_leg_idx > 0:
+                fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
+                if current_ga < fallback_threshold:
+                    # Demote to previous strategy
+                    current_leg_idx -= 1
+                    prev_leg = sequence_config[current_leg_idx]
+                    
+                    log.append({
+                        'month': m+1, 
+                        'event': 'FALLBACK', 
+                        'details': f"DEMOTED: {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{fallback_threshold:,.0f})"
+                    })
+                    
+                    active_strategy_name = prev_leg['strategy_name']
+                    active_config = prev_leg['config']
+                    active_target = prev_leg['target_ga']
+                    
+                    # Refresh Params for previous Leg
+                    overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
+                    
+                    # Reset Tier Level based on old map
+                    temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
+                    active_level = temp_tier.level
+            
+            # 2. CHECK FOR PROMOTION (with buffer to avoid flip-flopping)
             if current_leg_idx < len(sequence_config) - 1:
-                if current_ga >= active_target:
+                promotion_target = active_target * promotion_buffer_pct
+                if current_ga >= promotion_target:
                     current_leg_idx += 1
                     new_leg = sequence_config[current_leg_idx]
+                    
+                    # Store the threshold that triggered this promotion
+                    promotion_thresholds.append(promotion_target)
                     
                     log.append({
                         'month': m+1, 
@@ -61,7 +93,7 @@ class CareerManager:
                     temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
                     active_level = temp_tier.level
 
-            # 2. ECOSYSTEM (Tax/Contrib)
+            # 3. ECOSYSTEM (Tax/Contrib)
             tax_rate = active_config.get('eco_tax_rate', 25)
             tax_thresh = active_config.get('eco_tax_thresh', 12500)
             use_tax = active_config.get('eco_tax', False)
@@ -84,7 +116,7 @@ class CareerManager:
                 current_ga += amount
                 total_input += amount 
             
-            # 3. INSOLVENCY CHECK
+            # 4. INSOLVENCY CHECK
             insolvency_floor = active_config.get('eco_insolvency', 1000)
             if current_ga < insolvency_floor:
                 if len(log) == 0 or log[-1]['event'] != 'INSOLVENT':
@@ -92,7 +124,7 @@ class CareerManager:
                 trajectory.append(current_ga)
                 continue 
 
-            # 4. PLAY SESSIONS (DYNAMIC ENGINE SELECTION)
+            # 5. PLAY SESSIONS (DYNAMIC ENGINE SELECTION)
             sessions_this_month = sessions_per_year // 12
             if m % 12 < (sessions_per_year % 12): 
                 sessions_this_month += 1
@@ -210,7 +242,8 @@ def show_career_mode():
                 sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
             
             traj, log, final, total_in = await asyncio.to_thread(
-                CareerManager.run_compound_career, sequence_config, slider_start_ga.value, slider_years.value, slider_freq.value
+                CareerManager.run_compound_career, sequence_config, slider_start_ga.value, slider_years.value, slider_freq.value,
+                slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
             )
             
             chart_single_container.clear()
@@ -258,7 +291,10 @@ def show_career_mode():
                 error_details = []
                 for i in range(num_sims):
                     try:
-                        traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
+                        traj, log, final_ga, total_in = CareerManager.run_compound_career(
+                            sequence_config, start_ga, years, sessions,
+                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
+                        )
                         net_cost = total_in - final_ga
                         monthly_cost = net_cost / (years * 12)
                         batch_results.append({
@@ -415,6 +451,16 @@ def show_career_mode():
                 ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
                 slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
                 ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
+                
+                ui.separator().classes('bg-slate-700 my-4')
+                ui.label('🔄 FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
+                ui.label('Fallback Threshold (% below promotion)').classes('text-xs text-slate-400')
+                slider_fallback = ui.slider(min=60, max=95, value=80, step=5).props('color=orange')
+                ui.label().bind_text_from(slider_fallback, 'value', lambda v: f'{v}% - Demote if bankroll drops below this')
+                
+                ui.label('Promotion Buffer (% above target)').classes('text-xs text-slate-400 mt-2')
+                slider_promotion_buffer = ui.slider(min=100, max=150, value=120, step=5).props('color=yellow')
+                ui.label().bind_text_from(slider_promotion_buffer, 'value', lambda v: f'{v}% - Promote when this reached')
                 
                 ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
 
