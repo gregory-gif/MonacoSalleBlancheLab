@@ -233,7 +233,28 @@ def show_simulator():
                 'smart_exit_enabled': switch_smart_exit.value,
                 'smart_window_start': slider_smart_window.value,
                 'min_profit_to_lock': slider_min_lock.value,
-                'trailing_drop_pct': slider_trail_pct.value
+                'trailing_drop_pct': slider_trail_pct.value,
+                # Doctrine Engine
+                'doctrine_enabled': switch_doctrine_enabled.value,
+                'doctrine_pl_stop': slider_doctrine_pl_stop.value,
+                'doctrine_pl_target': slider_doctrine_pl_target.value,
+                'doctrine_pl_press_wins': slider_doctrine_pl_press_wins.value,
+                'doctrine_pl_press_depth': slider_doctrine_pl_press_depth.value,
+                'doctrine_pl_iron': slider_doctrine_pl_iron.value,
+                'doctrine_ti_stop': slider_doctrine_ti_stop.value,
+                'doctrine_ti_target': slider_doctrine_ti_target.value,
+                'doctrine_ti_press_wins': slider_doctrine_ti_press_wins.value,
+                'doctrine_ti_press_depth': slider_doctrine_ti_press_depth.value,
+                'doctrine_ti_iron': slider_doctrine_ti_iron.value,
+                'doctrine_loss_trigger': slider_doctrine_loss_trigger.value,
+                'doctrine_dd_pct': slider_doctrine_dd_pct.value,
+                'doctrine_dd_eur': slider_doctrine_dd_eur.value,
+                'doctrine_tight_min': slider_doctrine_tight_min.value,
+                'doctrine_tight_max': slider_doctrine_tight_max.value,
+                'doctrine_cooloff_enabled': switch_doctrine_cooloff.value,
+                'doctrine_cooloff_floor': slider_doctrine_cooloff_floor.value,
+                'doctrine_cooloff_months': slider_doctrine_cooloff_months.value,
+                'doctrine_recovery_pct': slider_doctrine_recovery_pct.value
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -285,6 +306,28 @@ def show_simulator():
             slider_smart_window.value = config.get('smart_window_start', 190)
             slider_min_lock.value = config.get('min_profit_to_lock', 20)
             slider_trail_pct.value = config.get('trailing_drop_pct', 0.20)
+            
+            # Doctrine Engine LOADS
+            switch_doctrine_enabled.value = config.get('doctrine_enabled', False)
+            slider_doctrine_pl_stop.value = config.get('doctrine_pl_stop', 10)
+            slider_doctrine_pl_target.value = config.get('doctrine_pl_target', 10)
+            slider_doctrine_pl_press_wins.value = config.get('doctrine_pl_press_wins', 3)
+            slider_doctrine_pl_press_depth.value = config.get('doctrine_pl_press_depth', 3)
+            slider_doctrine_pl_iron.value = config.get('doctrine_pl_iron', 3)
+            slider_doctrine_ti_stop.value = config.get('doctrine_ti_stop', 5)
+            slider_doctrine_ti_target.value = config.get('doctrine_ti_target', 5)
+            slider_doctrine_ti_press_wins.value = config.get('doctrine_ti_press_wins', 5)
+            slider_doctrine_ti_press_depth.value = config.get('doctrine_ti_press_depth', 1)
+            slider_doctrine_ti_iron.value = config.get('doctrine_ti_iron', 2)
+            slider_doctrine_loss_trigger.value = config.get('doctrine_loss_trigger', 8)
+            slider_doctrine_dd_pct.value = config.get('doctrine_dd_pct', 0.15)
+            slider_doctrine_dd_eur.value = config.get('doctrine_dd_eur', 3000)
+            slider_doctrine_tight_min.value = config.get('doctrine_tight_min', 1)
+            slider_doctrine_tight_max.value = config.get('doctrine_tight_max', 2)
+            switch_doctrine_cooloff.value = config.get('doctrine_cooloff_enabled', True)
+            slider_doctrine_cooloff_floor.value = config.get('doctrine_cooloff_floor', 3000)
+            slider_doctrine_cooloff_months.value = config.get('doctrine_cooloff_months', 1)
+            slider_doctrine_recovery_pct.value = config.get('doctrine_recovery_pct', 0.07)
             
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
@@ -347,7 +390,28 @@ def show_simulator():
                 smart_exit_enabled=switch_smart_exit.value,
                 smart_window_start=int(slider_smart_window.value),
                 min_profit_to_lock=int(slider_min_lock.value),
-                trailing_drop_pct=float(slider_trail_pct.value)
+                trailing_drop_pct=float(slider_trail_pct.value),
+                # Doctrine Engine
+                doctrine_enabled=switch_doctrine_enabled.value,
+                doctrine_pl_stop_loss=int(slider_doctrine_pl_stop.value),
+                doctrine_pl_profit_lock=int(slider_doctrine_pl_target.value),
+                doctrine_pl_press_wins=int(slider_doctrine_pl_press_wins.value),
+                doctrine_pl_press_depth=int(slider_doctrine_pl_press_depth.value),
+                doctrine_pl_iron_gate=int(slider_doctrine_pl_iron.value),
+                doctrine_ti_stop_loss=int(slider_doctrine_ti_stop.value),
+                doctrine_ti_profit_lock=int(slider_doctrine_ti_target.value),
+                doctrine_ti_press_wins=int(slider_doctrine_ti_press_wins.value),
+                doctrine_ti_press_depth=int(slider_doctrine_ti_press_depth.value),
+                doctrine_ti_iron_gate=int(slider_doctrine_ti_iron.value),
+                doctrine_big_loss_trigger=int(slider_doctrine_loss_trigger.value),
+                doctrine_dd_pct_trigger=float(slider_doctrine_dd_pct.value),
+                doctrine_dd_eur_trigger=int(slider_doctrine_dd_eur.value),
+                doctrine_tight_min_sessions=int(slider_doctrine_tight_min.value),
+                doctrine_tight_max_sessions=int(slider_doctrine_tight_max.value),
+                doctrine_cooloff_enabled=switch_doctrine_cooloff.value,
+                doctrine_cooloff_ga_floor=int(slider_doctrine_cooloff_floor.value),
+                doctrine_cooloff_min_months=int(slider_doctrine_cooloff_months.value),
+                doctrine_recovery_pct=float(slider_doctrine_recovery_pct.value)
             )
             
             res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
@@ -406,7 +470,28 @@ def show_simulator():
                 smart_exit_enabled=switch_smart_exit.value,
                 smart_window_start=int(slider_smart_window.value),
                 min_profit_to_lock=int(slider_min_lock.value),
-                trailing_drop_pct=float(slider_trail_pct.value)
+                trailing_drop_pct=float(slider_trail_pct.value),
+                # Doctrine Engine
+                doctrine_enabled=switch_doctrine_enabled.value,
+                doctrine_pl_stop_loss=int(slider_doctrine_pl_stop.value),
+                doctrine_pl_profit_lock=int(slider_doctrine_pl_target.value),
+                doctrine_pl_press_wins=int(slider_doctrine_pl_press_wins.value),
+                doctrine_pl_press_depth=int(slider_doctrine_pl_press_depth.value),
+                doctrine_pl_iron_gate=int(slider_doctrine_pl_iron.value),
+                doctrine_ti_stop_loss=int(slider_doctrine_ti_stop.value),
+                doctrine_ti_profit_lock=int(slider_doctrine_ti_target.value),
+                doctrine_ti_press_wins=int(slider_doctrine_ti_press_wins.value),
+                doctrine_ti_press_depth=int(slider_doctrine_ti_press_depth.value),
+                doctrine_ti_iron_gate=int(slider_doctrine_ti_iron.value),
+                doctrine_big_loss_trigger=int(slider_doctrine_loss_trigger.value),
+                doctrine_dd_pct_trigger=float(slider_doctrine_dd_pct.value),
+                doctrine_dd_eur_trigger=int(slider_doctrine_dd_eur.value),
+                doctrine_tight_min_sessions=int(slider_doctrine_tight_min.value),
+                doctrine_tight_max_sessions=int(slider_doctrine_tight_max.value),
+                doctrine_cooloff_enabled=switch_doctrine_cooloff.value,
+                doctrine_cooloff_ga_floor=int(slider_doctrine_cooloff_floor.value),
+                doctrine_cooloff_min_months=int(slider_doctrine_cooloff_months.value),
+                doctrine_recovery_pct=float(slider_doctrine_recovery_pct.value)
             )
 
             start_ga = config['start_ga']
@@ -635,6 +720,122 @@ def show_simulator():
                         lbl_trail_pct = ui.label()
                     slider_trail_pct = ui.slider(min=0.10, max=0.40, value=0.20, step=0.05).props('color=yellow')
                     lbl_trail_pct.bind_text_from(slider_trail_pct, 'value', lambda v: f'{int(v*100)}%')
+                
+                # ============================================================================
+                # DOCTRINE ENGINE v1.0 - DYNAMIC STATE-DRIVEN BETTING
+                # ============================================================================
+                with ui.card().classes('w-full bg-slate-800 p-4 border-2 border-purple-500 mb-4'):
+                    ui.label('⚡ DOCTRINE ENGINE v1.0 - STATE-DRIVEN BETTING').classes('font-bold text-purple-400 text-lg mb-4')
+                    ui.label('Automatically switches between PLATINUM → TIGHT → COOL_OFF based on results').classes('text-xs text-slate-400 mb-3')
+                    
+                    switch_doctrine_enabled = ui.switch('Enable Doctrine Engine').props('color=purple')
+                    switch_doctrine_enabled.value = False
+                    
+                    # PLATINUM DOCTRINE
+                    with ui.expansion('💎 PLATINUM Doctrine (Standard Evening)', icon='star').classes('w-full bg-gradient-to-r from-purple-900 to-indigo-900 text-white mb-2'):
+                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
+                            with ui.column():
+                                ui.label('Stop-Loss (units)').classes('text-xs text-slate-300')
+                                slider_doctrine_pl_stop = ui.slider(min=5, max=50, value=10, step=1).props('color=purple')
+                                ui.label().bind_text_from(slider_doctrine_pl_stop, 'value', lambda v: f'{int(v)}u')
+                            with ui.column():
+                                ui.label('Target (units)').classes('text-xs text-slate-300')
+                                slider_doctrine_pl_target = ui.slider(min=5, max=50, value=10, step=1).props('color=purple')
+                                ui.label().bind_text_from(slider_doctrine_pl_target, 'value', lambda v: f'{int(v)}u')
+                            with ui.column():
+                                ui.label('Press Wins').classes('text-xs text-slate-300')
+                                slider_doctrine_pl_press_wins = ui.slider(min=1, max=10, value=3, step=1).props('color=purple')
+                                ui.label().bind_text_from(slider_doctrine_pl_press_wins, 'value', lambda v: f'{int(v)} wins')
+                            with ui.column():
+                                ui.label('Press Depth').classes('text-xs text-slate-300')
+                                slider_doctrine_pl_press_depth = ui.slider(min=1, max=10, value=3, step=1).props('color=purple')
+                                ui.label().bind_text_from(slider_doctrine_pl_press_depth, 'value', lambda v: f'{int(v)} max' if v < 10 else 'Unlimited')
+                            with ui.column():
+                                ui.label('Iron Gate').classes('text-xs text-slate-300')
+                                slider_doctrine_pl_iron = ui.slider(min=2, max=10, value=3, step=1).props('color=purple')
+                                ui.label().bind_text_from(slider_doctrine_pl_iron, 'value', lambda v: f'{int(v)} losses')
+                    
+                    # TIGHT DOCTRINE
+                    with ui.expansion('🛡️ TIGHT Doctrine (Recovery Mode)', icon='shield').classes('w-full bg-gradient-to-r from-orange-900 to-red-900 text-white mb-2'):
+                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
+                            with ui.column():
+                                ui.label('Stop-Loss (units)').classes('text-xs text-slate-300')
+                                slider_doctrine_ti_stop = ui.slider(min=3, max=20, value=5, step=1).props('color=orange')
+                                ui.label().bind_text_from(slider_doctrine_ti_stop, 'value', lambda v: f'{int(v)}u')
+                            with ui.column():
+                                ui.label('Target (units)').classes('text-xs text-slate-300')
+                                slider_doctrine_ti_target = ui.slider(min=3, max=20, value=5, step=1).props('color=orange')
+                                ui.label().bind_text_from(slider_doctrine_ti_target, 'value', lambda v: f'{int(v)}u')
+                            with ui.column():
+                                ui.label('Press Wins').classes('text-xs text-slate-300')
+                                slider_doctrine_ti_press_wins = ui.slider(min=3, max=15, value=5, step=1).props('color=orange')
+                                ui.label().bind_text_from(slider_doctrine_ti_press_wins, 'value', lambda v: f'{int(v)} wins')
+                            with ui.column():
+                                ui.label('Press Depth').classes('text-xs text-slate-300')
+                                slider_doctrine_ti_press_depth = ui.slider(min=0, max=3, value=1, step=1).props('color=orange')
+                                ui.label().bind_text_from(slider_doctrine_ti_press_depth, 'value', lambda v: f'{int(v)} max')
+                            with ui.column():
+                                ui.label('Iron Gate').classes('text-xs text-slate-300')
+                                slider_doctrine_ti_iron = ui.slider(min=1, max=5, value=2, step=1).props('color=orange')
+                                ui.label().bind_text_from(slider_doctrine_ti_iron, 'value', lambda v: f'{int(v)} losses')
+                    
+                    # TRIGGERS
+                    with ui.expansion('🚨 Triggers (PLATINUM → TIGHT)', icon='warning').classes('w-full bg-slate-900 text-white mb-2'):
+                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
+                            with ui.column():
+                                ui.label('Big Loss Trigger (units)').classes('text-xs text-slate-300')
+                                ui.label('Single loss > this triggers TIGHT').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_loss_trigger = ui.slider(min=5, max=20, value=8, step=1).props('color=red')
+                                ui.label().bind_text_from(slider_doctrine_loss_trigger, 'value', lambda v: f'-{int(v)}u')
+                            with ui.column():
+                                ui.label('Drawdown % Trigger').classes('text-xs text-slate-300')
+                                ui.label('% drop from peak GA').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_dd_pct = ui.slider(min=0.05, max=0.30, value=0.15, step=0.01).props('color=red')
+                                ui.label().bind_text_from(slider_doctrine_dd_pct, 'value', lambda v: f'{int(v*100)}%')
+                            with ui.column().classes('col-span-2'):
+                                ui.label('Drawdown € Trigger').classes('text-xs text-slate-300')
+                                ui.label('Absolute € drop from peak (0 = disabled)').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_dd_eur = ui.slider(min=0, max=10000, value=3000, step=500).props('color=red')
+                                ui.label().bind_text_from(slider_doctrine_dd_eur, 'value', lambda v: f'€{int(v):,}' if v > 0 else 'Disabled')
+                    
+                    # TIGHT SESSION LIMITS
+                    with ui.expansion('⏱️ TIGHT Session Limits', icon='schedule').classes('w-full bg-slate-900 text-white mb-2'):
+                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
+                            with ui.column():
+                                ui.label('Minimum TIGHT Sessions').classes('text-xs text-slate-300')
+                                ui.label('Before checking recovery').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_tight_min = ui.slider(min=1, max=5, value=1, step=1).props('color=yellow')
+                                ui.label().bind_text_from(slider_doctrine_tight_min, 'value', lambda v: f'{int(v)} sessions')
+                            with ui.column():
+                                ui.label('Maximum TIGHT Sessions').classes('text-xs text-slate-300')
+                                ui.label('Before COOL_OFF if still struggling').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_tight_max = ui.slider(min=1, max=5, value=2, step=1).props('color=yellow')
+                                ui.label().bind_text_from(slider_doctrine_tight_max, 'value', lambda v: f'{int(v)} sessions')
+                    
+                    # COOL-OFF MODE
+                    with ui.expansion('❄️ COOL-OFF Mode (Safety)', icon='ac_unit').classes('w-full bg-gradient-to-r from-blue-900 to-cyan-900 text-white mb-2'):
+                        switch_doctrine_cooloff = ui.switch('Enable Cool-Off Mode').props('color=cyan')
+                        switch_doctrine_cooloff.value = True
+                        with ui.grid(columns=2).classes('w-full gap-3 p-3 mt-2'):
+                            with ui.column():
+                                ui.label('GA Floor (Insolvency)').classes('text-xs text-slate-300')
+                                ui.label('Bankroll < this triggers COOL_OFF').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_cooloff_floor = ui.slider(min=1000, max=10000, value=3000, step=500).props('color=cyan')
+                                ui.label().bind_text_from(slider_doctrine_cooloff_floor, 'value', lambda v: f'€{int(v):,}')
+                            with ui.column():
+                                ui.label('Minimum Cool-Off Months').classes('text-xs text-slate-300')
+                                ui.label('Mandatory recovery time').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_cooloff_months = ui.slider(min=1, max=6, value=1, step=1).props('color=cyan')
+                                ui.label().bind_text_from(slider_doctrine_cooloff_months, 'value', lambda v: f'{int(v)} months')
+                            with ui.column().classes('col-span-2'):
+                                ui.label('Recovery Threshold (%)').classes('text-xs text-slate-300')
+                                ui.label('Drawdown < this % allows return to PLATINUM').classes('text-xs text-slate-500 italic')
+                                slider_doctrine_recovery_pct = ui.slider(min=0.03, max=0.15, value=0.07, step=0.01).props('color=cyan')
+                                ui.label().bind_text_from(slider_doctrine_recovery_pct, 'value', lambda v: f'{int(v*100)}%')
+                    
+                    # Note: Roulette coupling not relevant for Baccarat sim
+                    ui.label('Note: Roulette coupling settings available in Roulette Simulator').classes('text-xs text-slate-500 italic mt-2')
+
 
             ui.separator().classes('bg-slate-700')
             with ui.row().classes('w-full items-center justify-between'):
