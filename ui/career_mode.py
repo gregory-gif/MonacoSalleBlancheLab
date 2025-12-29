@@ -21,7 +21,7 @@ ROULETTE_BETS = {'Red', 'Black', 'Even', 'Odd', '1-18', '19-36'}
 
 class CareerManager:
     @staticmethod
-    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year, fallback_threshold_pct=0.80, promotion_buffer_pct=1.20):
+    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year, fallback_threshold_pct=0.80, promotion_buffer_pct=1.20, trailing_fallback_pct=0.90):
         current_ga = start_ga
         current_leg_idx = 0
         
@@ -64,20 +64,45 @@ class CareerManager:
         
         # Track thresholds for fallback mechanism
         promotion_thresholds = [0]  # Track threshold that triggered each leg promotion
+        trailing_active = [False] * len(sequence_config)  # Track if trailing fallback is active for each leg
+        trailing_peak = [start_ga]  # Track peak GA reached in each leg for trailing calculation
         
         for m in range(months):
             # 1. CHECK FOR DEMOTION (Fallback to previous strategy if bankroll drops too low)
             if current_leg_idx > 0:
+                # Update trailing peak if we've reached new high in current leg
+                if current_ga > trailing_peak[current_leg_idx]:
+                    trailing_peak[current_leg_idx] = current_ga
+                    trailing_active[current_leg_idx] = True  # Activate trailing once we exceed promotion threshold
+                
+                # Standard fallback check
                 fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
-                if current_ga < fallback_threshold:
+                
+                # Trailing fallback check - if enabled and we drop X% from peak
+                trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else float('inf')
+                
+                if current_ga < min(fallback_threshold, trailing_threshold):
+                    # Determine which mechanism triggered
+                    mechanism = "STANDARD"
+                    threshold_value = fallback_threshold
+                    if trailing_active[current_leg_idx] and trailing_threshold < fallback_threshold:
+                        mechanism = "🔄 TRAILING"
+                        threshold_value = trailing_threshold
+                    
                     # Demote to previous strategy
                     current_leg_idx -= 1
                     prev_leg = sequence_config[current_leg_idx]
                     
+                    # Reset trailing for demoted leg (we're dropping back)
+                    if current_leg_idx + 1 < len(trailing_active):
+                        trailing_active[current_leg_idx + 1] = False
+                    if current_leg_idx + 1 < len(trailing_peak):
+                        trailing_peak[current_leg_idx + 1] = 0
+                    
                     log.append({
                         'month': m+1, 
                         'event': 'FALLBACK', 
-                        'details': f"DEMOTED: {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{fallback_threshold:,.0f})"
+                        'details': f"{mechanism} DEMOTED: {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{threshold_value:,.0f})"
                     })
                     
                     active_strategy_name = prev_leg['strategy_name']
@@ -100,6 +125,13 @@ class CareerManager:
                     
                     # Store the threshold that triggered this promotion
                     promotion_thresholds.append(promotion_target)
+                    
+                    # Initialize trailing tracking for this new leg
+                    while len(trailing_peak) <= current_leg_idx:
+                        trailing_peak.append(0)
+                        trailing_active.append(False)
+                    trailing_peak[current_leg_idx] = current_ga
+                    trailing_active[current_leg_idx] = True
                     
                     log.append({
                         'month': m+1, 
@@ -365,7 +397,8 @@ def show_career_mode():
                     try:
                         traj, log, final_ga, total_in, doctrine_summary = CareerManager.run_compound_career(
                             sequence_config, start_ga, years, sessions,
-                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
+                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0,
+                            slider_trailing_fallback.value / 100.0
                         )
                         net_cost = total_in - final_ga
                         monthly_cost = net_cost / (years * 12)
@@ -496,7 +529,8 @@ def show_career_mode():
                         
                         traj, log, final, total_in, doctrine_summary = await asyncio.to_thread(
                             CareerManager.run_compound_career, refresh_config, slider_start_ga.value, slider_years.value, slider_freq.value,
-                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
+                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0,
+                            slider_trailing_fallback.value / 100.0
                         )
                         
                         single_sim_chart.clear()
@@ -628,7 +662,8 @@ Median_Monthly_Cost,{med_cost:.2f}
 Avg_Monthly_Cost,{avg_cost:.2f}
 Total_Months,{years * 12}
 Fallback_Threshold,{slider_fallback.value}
-Promotion_Buffer,{slider_promotion_buffer.value}"""
+Promotion_Buffer,{slider_promotion_buffer.value}
+Trailing_Fallback,{slider_trailing_fallback.value}"""
                     
                     career_summary_area = ui.textarea(value=career_summary_csv).classes('w-full font-mono text-xs').props('rows=15 readonly')
                     
@@ -722,6 +757,12 @@ Promotion_Buffer,{slider_promotion_buffer.value}"""
                 ui.label('Promotion Buffer (% above target)').classes('text-xs text-slate-400 mt-2')
                 slider_promotion_buffer = ui.slider(min=100, max=150, value=120, step=5).props('color=yellow')
                 ui.label().bind_text_from(slider_promotion_buffer, 'value', lambda v: f'{v}% - Promote when this reached')
+                
+                ui.separator().classes('bg-slate-700 my-2')
+                ui.label('🔄 TRAILING FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
+                ui.label('Trailing Fallback (% from peak after promotion)').classes('text-xs text-slate-400')
+                slider_trailing_fallback = ui.slider(min=85, max=98, value=90, step=1).props('color=deep-orange')
+                ui.label().bind_text_from(slider_trailing_fallback, 'value', lambda v: f'{v}% - Trailing stop from peak')
                 
                 ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
 
