@@ -250,6 +250,56 @@ class CareerManager:
                 active_level = used_lvl 
                 last_session_won = (pnl > 0)
                 
+                # === INTRA-SESSION TRAILING FALLBACK CHECK ===
+                # Check after each session to prevent large drawdowns within a month
+                if current_leg_idx > 0:
+                    # Update trailing peak if we've reached new high
+                    if current_ga > trailing_peak[current_leg_idx]:
+                        trailing_peak[current_leg_idx] = current_ga
+                        trailing_active[current_leg_idx] = True
+                    
+                    # Check both fallback mechanisms
+                    fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
+                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else float('inf')
+                    
+                    if current_ga < min(fallback_threshold, trailing_threshold):
+                        # Determine which mechanism triggered
+                        mechanism = "STANDARD"
+                        threshold_value = fallback_threshold
+                        if trailing_active[current_leg_idx] and trailing_threshold < fallback_threshold:
+                            mechanism = "🔄 TRAILING"
+                            threshold_value = trailing_threshold
+                        
+                        # Demote to previous strategy
+                        current_leg_idx -= 1
+                        prev_leg = sequence_config[current_leg_idx]
+                        
+                        # Reset trailing for demoted leg
+                        if current_leg_idx + 1 < len(trailing_active):
+                            trailing_active[current_leg_idx + 1] = False
+                        if current_leg_idx + 1 < len(trailing_peak):
+                            trailing_peak[current_leg_idx + 1] = 0
+                        
+                        log.append({
+                            'month': m+1, 
+                            'event': 'FALLBACK', 
+                            'details': f"{mechanism} DEMOTED (intra-month): {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{threshold_value:,.0f})"
+                        })
+                        
+                        active_strategy_name = prev_leg['strategy_name']
+                        active_config = prev_leg['config']
+                        active_target = prev_leg['target_ga']
+                        
+                        # Refresh Params for previous Leg
+                        overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
+                        
+                        # Reset Tier Level based on old map
+                        temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
+                        active_level = temp_tier.level
+                        
+                        # Break out of remaining sessions this month to apply new strategy
+                        break
+                
                 # Update doctrine after each session
                 if doctrine_enabled and doctrine_ctx:
                     result_u = pnl / base_bet
