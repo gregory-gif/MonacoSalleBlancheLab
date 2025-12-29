@@ -8,8 +8,12 @@ from copy import deepcopy
 # --- CRITICAL FIX: IMPORT BACCARAT WORKER ---
 from ui.simulator import BaccaratWorker # Changed from SimulationWorker
 from ui.roulette_sim import RouletteWorker
-from engine.strategy_rules import StrategyOverrides, BetStrategy, PlayMode
+from engine.strategy_rules import StrategyOverrides, BetStrategy, PlayMode, build_doctrine_configs_from_overrides
 from engine.tier_params import get_tier_for_ga, generate_tier_map
+from engine.doctrine_engine import (
+    DoctrineContext, choose_state_for_next_session, update_after_session,
+    update_after_month, get_doctrine_config, log_state_transition
+)
 from utils.persistence import load_profile
 
 # List of Roulette-specific bets to detect Game Type
@@ -28,6 +32,27 @@ class CareerManager:
         
         # Extract Params & Detect Game Type
         overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
+        
+        # === DOCTRINE ENGINE INITIALIZATION ===
+        doctrine_enabled = active_config.get('doctrine_en', False)
+        doctrine_ctx = None
+        platinum_cfg = None
+        tight_cfg = None
+        state_rules = None
+        
+        if doctrine_enabled:
+            # Build doctrine configurations from overrides
+            platinum_cfg, tight_cfg, state_rules = build_doctrine_configs_from_overrides(overrides)
+            
+            # Initialize doctrine context
+            doctrine_ctx = DoctrineContext(
+                state="PLATINUM",
+                GA_current=current_ga,
+                GA_peak=current_ga,
+                last_result_u=0.0,
+                tight_sessions_done=0,
+                cooloff_months_done=0
+            )
         
         trajectory = []
         log = []
@@ -124,12 +149,59 @@ class CareerManager:
                 trajectory.append(current_ga)
                 continue 
 
+            # === DOCTRINE STATE MACHINE ===
+            if doctrine_enabled and doctrine_ctx:
+                # Update context with current GA
+                doctrine_ctx.GA_current = current_ga
+                
+                # Determine next state
+                old_state = doctrine_ctx.state
+                new_state = choose_state_for_next_session(doctrine_ctx, state_rules)
+                
+                # Log state transition if changed
+                if new_state != old_state:
+                    reason = "Unknown"
+                    if new_state == "TIGHT":
+                        if doctrine_ctx.last_result_u <= -state_rules.loss_trigger_pl_u:
+                            reason = f"Big loss: -{abs(doctrine_ctx.last_result_u):.1f}u"
+                        else:
+                            dd_pct = (doctrine_ctx.GA_peak - current_ga) / doctrine_ctx.GA_peak if doctrine_ctx.GA_peak > 0 else 0
+                            reason = f"Drawdown: {dd_pct*100:.1f}%"
+                    elif new_state == "COOL_OFF":
+                        if current_ga < state_rules.cooloff_ga_floor:
+                            reason = f"Insolvency: €{current_ga:,.0f} < €{state_rules.cooloff_ga_floor:,.0f}"
+                        else:
+                            reason = "Max TIGHT sessions exhausted"
+                    elif new_state == "PLATINUM":
+                        reason = "Recovered from drawdown"
+                    
+                    log_state_transition(doctrine_ctx, old_state, new_state, reason)
+                    log.append({
+                        'month': m+1,
+                        'event': 'DOCTRINE',
+                        'details': f"Doctrine: {old_state} → {new_state} ({reason})"
+                    })
+                    doctrine_ctx.state = new_state
+                
+                # Get active doctrine config
+                active_doctrine_cfg = get_doctrine_config(doctrine_ctx.state, platinum_cfg, tight_cfg)
+                
+                # Override session parameters with doctrine config
+                overrides.stop_loss_units = int(active_doctrine_cfg.stop_loss_u)
+                overrides.profit_lock_units = int(active_doctrine_cfg.target_u)
+                overrides.press_trigger_wins = active_doctrine_cfg.press_wins
+                overrides.press_depth = active_doctrine_cfg.press_depth
+                overrides.iron_gate_limit = active_doctrine_cfg.iron_gate
+
             # 5. PLAY SESSIONS (DYNAMIC ENGINE SELECTION)
             sessions_this_month = sessions_per_year // 12
             if m % 12 < (sessions_per_year % 12): 
                 sessions_this_month += 1
             
+            month_pnl = 0.0  # Track monthly P&L for doctrine
             for _ in range(sessions_this_month):
+                session_ga_before = current_ga
+                
                 if game_type == 'Roulette':
                     # --- ROULETTE ENGINE (returns 10 values) ---
                     pnl, vol, used_lvl, spins, spice_stats, exit_reason, max_caroline, max_dalembert, press_streak, peak_profit = RouletteWorker.run_session(
@@ -142,19 +214,48 @@ class CareerManager:
                     )
                 
                 current_ga += pnl
+                month_pnl += pnl
                 active_level = used_lvl 
                 last_session_won = (pnl > 0)
+                
+                # Update doctrine after each session
+                if doctrine_enabled and doctrine_ctx:
+                    result_u = pnl / base_bet
+                    update_after_session(doctrine_ctx, result_u, current_ga, doctrine_ctx.state)
+            
+            # Update doctrine after month (for cool-off tracking)
+            if doctrine_enabled and doctrine_ctx:
+                update_after_month(doctrine_ctx)
             
             trajectory.append(current_ga)
             
             if m % 12 == 0:
+                year_num = (m // 12) + 1
+                status_detail = f"Year {year_num} | €{current_ga:,.0f} | {active_strategy_name} ({game_type})"
+                
+                # Add doctrine state to status if enabled
+                if doctrine_enabled and doctrine_ctx:
+                    status_detail += f" | Doctrine: {doctrine_ctx.state}"
+                
                 log.append({
                     'month': m+1, 
                     'event': 'STATUS', 
-                    'details': f"Year {(m//12)+1} | €{current_ga:,.0f} | {active_strategy_name} ({game_type})"
+                    'details': status_detail
                 })
 
-        return trajectory, log, current_ga, total_input
+        # Prepare doctrine summary if enabled
+        doctrine_summary = None
+        if doctrine_enabled and doctrine_ctx:
+            doctrine_summary = {
+                'final_state': doctrine_ctx.state,
+                'platinum_sessions': doctrine_ctx.platinum_sessions,
+                'tight_sessions': doctrine_ctx.tight_sessions,
+                'cooloff_months': doctrine_ctx.cooloff_months,
+                'transitions': doctrine_ctx.transitions,
+                'peak_ga': doctrine_ctx.GA_peak
+            }
+
+        return trajectory, log, current_ga, total_input, doctrine_summary
 
     @staticmethod
     def _extract_params(config):
@@ -262,7 +363,7 @@ def show_career_mode():
                 error_details = []
                 for i in range(num_sims):
                     try:
-                        traj, log, final_ga, total_in = CareerManager.run_compound_career(
+                        traj, log, final_ga, total_in, doctrine_summary = CareerManager.run_compound_career(
                             sequence_config, start_ga, years, sessions,
                             slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
                         )
@@ -272,7 +373,8 @@ def show_career_mode():
                             'trajectory': traj,
                             'log': log,
                             'final': final_ga,
-                            'monthly_cost': monthly_cost
+                            'monthly_cost': monthly_cost,
+                            'doctrine_summary': doctrine_summary
                         })
                     except Exception as e:
                         error_msg = f"Sim {i+1} error: {str(e)}"
@@ -287,6 +389,7 @@ def show_career_mode():
                             ],
                             'final': 0,
                             'monthly_cost': 0,
+                            'doctrine_summary': None,
                             'error': str(e)
                         })
                     # Update progress bar (simulate progress)
@@ -391,7 +494,7 @@ def show_career_mode():
                             cfg = saved_strats.get(leg['strategy'])
                             refresh_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
                         
-                        traj, log, final, total_in = await asyncio.to_thread(
+                        traj, log, final, total_in, doctrine_summary = await asyncio.to_thread(
                             CareerManager.run_compound_career, refresh_config, slider_start_ga.value, slider_years.value, slider_freq.value,
                             slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
                         )
@@ -400,6 +503,14 @@ def show_career_mode():
                         with single_sim_chart:
                             res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
                             ui.label(f"Result: €{final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                            
+                            # Add doctrine stats if available
+                            if doctrine_summary:
+                                ui.label(f"Doctrine: {doctrine_summary['final_state']} | "
+                                        f"Platinum: {doctrine_summary['platinum_sessions']}s | "
+                                        f"Tight: {doctrine_summary['tight_sessions']}s | "
+                                        f"Cool-Off: {doctrine_summary['cooloff_months']}m").classes('text-xs text-purple-400 mb-2')
+                            
                             fig = go.Figure()
                             fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
                             for leg in legs[:-1]:
@@ -519,7 +630,22 @@ Promotion_Buffer,{slider_promotion_buffer.value}"""
                         color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
                         if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
                         if l['event'] == 'ERROR': color = "text-red-600 font-bold"
+                        if l['event'] == 'DOCTRINE': color = "text-purple-400 font-bold"
                         ui.label(f"M{l['month']} | {l['event']}: {l['details']}").classes(f'text-xs {color}')
+                
+                # Doctrine Summary for Sim #1
+                if sim1_doctrine := valid_results[0].get('doctrine_summary'):
+                    with ui.expansion('⚡ Doctrine Summary (Sim #1)', icon='insights').classes('w-full bg-purple-900 mt-4'):
+                        ui.label(f"Final State: {sim1_doctrine['final_state']}").classes('text-sm text-white font-bold')
+                        ui.label(f"Peak GA: €{sim1_doctrine['peak_ga']:,.0f}").classes('text-xs text-slate-300')
+                        ui.label(f"Platinum Sessions: {sim1_doctrine['platinum_sessions']}").classes('text-xs text-slate-300')
+                        ui.label(f"Tight Sessions: {sim1_doctrine['tight_sessions']}").classes('text-xs text-slate-300')
+                        ui.label(f"Cool-Off Months: {sim1_doctrine['cooloff_months']}").classes('text-xs text-slate-300')
+                        
+                        if sim1_doctrine['transitions']:
+                            ui.label('State Transitions:').classes('text-xs text-purple-300 font-bold mt-2')
+                            for trans in sim1_doctrine['transitions'][:10]:  # Show first 10 transitions
+                                ui.label(f"Session {trans['session']}: {trans['from']} → {trans['to']} ({trans['reason']})").classes('text-xs text-slate-400')
         except Exception as e:
             ui.notify(f'Critical error: {e}', type='negative')
             import traceback; traceback.print_exc()
