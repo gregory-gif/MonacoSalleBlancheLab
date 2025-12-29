@@ -387,6 +387,7 @@ def show_career_mode():
                 fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                 ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
 
+                # YOUR REALITY section - placed before CSV tools
                 ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
 
                 sim1_traj = valid_results[0]['trajectory']
@@ -407,7 +408,7 @@ def show_career_mode():
                     fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                     ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
 
-                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
+                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2 mb-4')
 
                 # CSV Export for AI Analysis
                 with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
