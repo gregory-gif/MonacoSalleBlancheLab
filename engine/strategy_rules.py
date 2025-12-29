@@ -98,6 +98,44 @@ class StrategyOverrides:
     spice_voisins_min_pl: int = 35
     spice_voisins_max_pl: int = 100
     
+    # --- DOCTRINE ENGINE v1.0 ---
+    doctrine_enabled: bool = False
+    
+    # Platinum Doctrine
+    doctrine_pl_stop: float = 10.0
+    doctrine_pl_target: float = 10.0
+    doctrine_pl_press_wins: int = 3
+    doctrine_pl_press_depth: int = 3
+    doctrine_pl_iron: int = 3
+    
+    # Tight Doctrine
+    doctrine_ti_stop: float = 5.0
+    doctrine_ti_target: float = 5.0
+    doctrine_ti_press_wins: int = 5
+    doctrine_ti_press_depth: int = 1
+    doctrine_ti_iron: int = 2
+    
+    # Triggers
+    doctrine_loss_trigger: float = 8.0
+    doctrine_dd_pct_trigger: float = 0.15
+    doctrine_dd_eur_trigger: float = 3000.0
+    
+    # Tight Session Limits
+    doctrine_tight_min: int = 1
+    doctrine_tight_max: int = 2
+    
+    # Cool-Off
+    doctrine_cooloff_enabled: bool = True
+    doctrine_cooloff_floor: float = 3000.0
+    doctrine_cooloff_min_months: int = 1
+    doctrine_cooloff_recovery_pct: float = 0.07
+    
+    # Roulette Coupling
+    doctrine_link_roulette: bool = False
+    doctrine_roulette_pl: float = 1.0
+    doctrine_roulette_ti: float = 0.5
+    doctrine_roulette_co: float = 0.0
+    
     # --- TAX ---
     tax_threshold: float = 12500.0
     tax_rate: float = 25.0
@@ -198,3 +236,51 @@ class BaccaratStrategist:
         else:
             state.consecutive_losses += 1
             state.current_press_streak = 0
+
+
+# ============================================================================
+# DOCTRINE ENGINE HELPER
+# ============================================================================
+
+def build_doctrine_configs_from_overrides(overrides: StrategyOverrides):
+    """
+    Convert StrategyOverrides into Doctrine configurations.
+    
+    Returns:
+        (platinum_config, tight_config, state_rules) tuple
+    """
+    from engine.doctrine_engine import DoctrineConfig, DoctrineStateRules
+    
+    platinum_cfg = DoctrineConfig(
+        stop_loss_u=overrides.doctrine_pl_stop,
+        target_u=overrides.doctrine_pl_target,
+        press_wins=overrides.doctrine_pl_press_wins,
+        press_depth=overrides.doctrine_pl_press_depth,
+        iron_gate=overrides.doctrine_pl_iron
+    )
+    
+    tight_cfg = DoctrineConfig(
+        stop_loss_u=overrides.doctrine_ti_stop,
+        target_u=overrides.doctrine_ti_target,
+        press_wins=overrides.doctrine_ti_press_wins,
+        press_depth=overrides.doctrine_ti_press_depth,
+        iron_gate=overrides.doctrine_ti_iron
+    )
+    
+    state_rules = DoctrineStateRules(
+        loss_trigger_pl_u=overrides.doctrine_loss_trigger,
+        drawdown_trigger_pct=overrides.doctrine_dd_pct_trigger,
+        drawdown_trigger_eur=overrides.doctrine_dd_eur_trigger,
+        tight_min_sessions=overrides.doctrine_tight_min,
+        tight_max_sessions=overrides.doctrine_tight_max,
+        cooloff_enabled=overrides.doctrine_cooloff_enabled,
+        cooloff_ga_floor=overrides.doctrine_cooloff_floor,
+        cooloff_min_months=overrides.doctrine_cooloff_min_months,
+        cooloff_recovery_drawdown_pct=overrides.doctrine_cooloff_recovery_pct,
+        link_roulette_to_state=overrides.doctrine_link_roulette,
+        roulette_scale_platinum=overrides.doctrine_roulette_pl,
+        roulette_scale_tight=overrides.doctrine_roulette_ti,
+        roulette_scale_cooloff=overrides.doctrine_roulette_co
+    )
+    
+    return platinum_cfg, tight_cfg, state_rules
