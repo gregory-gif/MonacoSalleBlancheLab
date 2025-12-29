@@ -332,10 +332,12 @@ class SpiceEngine:
     def __init__(
         self,
         spice_config: Dict[SpiceType, SpiceRule],
-        global_config: GlobalSpiceConfig
+        global_config: GlobalSpiceConfig,
+        unit_ratio: float = 1.0
     ):
         self.spice_config = spice_config
         self.global_config = global_config
+        self.unit_ratio = unit_ratio  # Hybrid mode: 1.0 = standard, 0.5 = half units
         self.state = SpiceState()
         
         # Initialize tracking dictionaries
@@ -477,9 +479,9 @@ class SpiceEngine:
         self.state.spices_this_spin += 1
         self.state.spice_usage_by_type[spice_type.value] += 1
         
-        # Track cost
+        # Track cost (apply unit ratio for hybrid mode)
         pattern = SPICE_PATTERNS[pattern_id]
-        cost = pattern.unit_cost * spice.unit_bet_size_eur
+        cost = pattern.unit_cost * spice.unit_bet_size_eur * self.unit_ratio
         self.state.spice_total_cost += cost
     
     def resolve_spice(
@@ -502,8 +504,8 @@ class SpiceEngine:
         spice = self.spice_config[spice_type]
         pattern = SPICE_PATTERNS[spice.pattern_id]
         
-        # Calculate cost
-        cost = pattern.unit_cost * unit_bet_size
+        # Calculate cost (apply unit ratio for hybrid mode)
+        cost = pattern.unit_cost * unit_bet_size * self.unit_ratio
         
         # Calculate payout
         payout = 0.0

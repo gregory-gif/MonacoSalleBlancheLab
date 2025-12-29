@@ -97,10 +97,10 @@ class RouletteWorker:
                 stop_loss=stop_loss_eur
             )
             
-            # Track spice cost in volume
+            # Track spice cost in volume (apply unit ratio for hybrid mode)
             if fired_spice_type:
                 pattern = SPICE_PATTERNS[spice_engine.spice_config[fired_spice_type].pattern_id]
-                spice_cost = pattern.unit_cost * base_bet
+                spice_cost = pattern.unit_cost * base_bet * spice_engine.unit_ratio
                 volume += spice_cost
 
             # Volume Calc for Main Bets
@@ -437,7 +437,8 @@ def show_roulette_sim():
                 'spice_zero_en': switch_spice_zero.value, 'spice_zero_trig': slider_spice_zero_trig.value,
                 'spice_zero_max': slider_spice_zero_max.value, 'spice_zero_cool': slider_spice_zero_cool.value,
                 'spice_tiers_en': switch_spice_tiers.value, 'spice_tiers_trig': slider_spice_tiers_trig.value,
-                'spice_tiers_max': slider_spice_tiers_max.value, 'spice_tiers_cool': slider_spice_tiers_cool.value
+                'spice_tiers_max': slider_spice_tiers_max.value, 'spice_tiers_cool': slider_spice_tiers_cool.value,
+                'spice_hybrid_mode': switch_spice_hybrid_mode.value
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -504,6 +505,8 @@ def show_roulette_sim():
             slider_spice_tiers_trig.value = config.get('spice_tiers_trig', 25)
             slider_spice_tiers_max.value = config.get('spice_tiers_max', 1)
             slider_spice_tiers_cool.value = config.get('spice_tiers_cool', 10)
+            
+            switch_spice_hybrid_mode.value = config.get('spice_hybrid_mode', False)
             
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
@@ -643,6 +646,7 @@ def show_roulette_sim():
                 spice_global_max_per_spin=int(slider_spice_global_max_spin.value),
                 spice_disable_if_caroline_step4=switch_spice_disable_caroline.value,
                 spice_disable_if_pl_below_zero=switch_spice_disable_neg_pl.value,
+                spice_unit_ratio=0.5 if switch_spice_hybrid_mode.value else 1.0,
                 
                 # Family A - Light Spices
                 spice_zero_leger_enabled=switch_spice_zero.value,
@@ -945,6 +949,14 @@ def show_roulette_sim():
                             switch_spice_disable_neg_pl = ui.switch('Disable if P/L < 0').props('color=orange')
                             switch_spice_disable_neg_pl.value = True
                             ui.label('Safety: Only fire spices when in profit').classes('text-xs text-slate-400 italic')
+                        
+                        with ui.column().classes('col-span-2'):
+                            ui.separator().classes('bg-slate-700 my-2')
+                            ui.label('🎯 HYBRID MODE (Split Table Minimums)').classes('text-sm font-bold text-yellow-400 mb-2')
+                            switch_spice_hybrid_mode = ui.switch('Enable Hybrid Mode (Inside Bets @ 50%)').props('color=yellow')
+                            switch_spice_hybrid_mode.value = False
+                            ui.label('🎲 Use Case: Salle Privée - Grind with €10 chips (Red/Odd), attack with €5 chips (Spice bets)').classes('text-xs text-slate-400 italic')
+                            ui.label('📊 Example: Zéro Léger (3 chips) = €15 cost instead of €30 when enabled').classes('text-xs text-green-400 italic mt-1')
                 
                 # FAMILY A: LIGHT SPICES
                 with ui.expansion('💎 Family A - Light Spices (Low Risk, Frequent)', icon='wb_sunny').classes('w-full bg-gradient-to-r from-cyan-900 to-blue-900 text-white mb-2'):

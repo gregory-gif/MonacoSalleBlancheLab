@@ -44,6 +44,7 @@ class StrategyOverrides:
     spice_global_max_per_spin: int = 1
     spice_disable_if_caroline_step4: bool = True
     spice_disable_if_pl_below_zero: bool = True
+    spice_unit_ratio: float = 1.0  # HYBRID MODE: 1.0 = standard, 0.5 = half units for spice
     
     # Family A - Light Spices
     spice_zero_leger_enabled: bool = False

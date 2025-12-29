@@ -192,7 +192,8 @@ class CareerManager:
             spice_global_max_per_session=config.get('spice_global_max_session', 3),
             spice_global_max_per_spin=config.get('spice_global_max_spin', 1),
             spice_disable_if_caroline_step4=config.get('spice_disable_caroline', True),
-            spice_disable_if_pl_below_zero=config.get('spice_disable_below_zero', True)
+            spice_disable_if_pl_below_zero=config.get('spice_disable_below_zero', True),
+            spice_unit_ratio=0.5 if config.get('spice_hybrid_mode', False) else 1.0
         )
         use_ratchet = config.get('risk_ratch', False)
         penalty_mode = config.get('tac_penalty', True)

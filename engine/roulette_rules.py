@@ -338,4 +338,7 @@ def create_spice_engine_from_overrides(overrides, unit_size: float = 10.0):
         disable_if_pl_below_zero=overrides.spice_disable_if_pl_below_zero,
     )
     
-    return SpiceEngine(spice_config, global_config)
+    # Get unit ratio from overrides (Hybrid Mode support)
+    unit_ratio = getattr(overrides, 'spice_unit_ratio', 1.0)
+    
+    return SpiceEngine(spice_config, global_config, unit_ratio)
