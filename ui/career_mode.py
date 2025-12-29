@@ -231,36 +231,6 @@ def show_career_mode():
         legs.pop(index)
         refresh_leg_ui()
 
-    async def refresh_single_career():
-        if not legs: return
-        try:
-            profile = load_profile()
-            saved_strats = profile.get('saved_strategies', {})
-            sequence_config = []
-            for leg in legs:
-                cfg = saved_strats.get(leg['strategy'])
-                sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
-            
-            traj, log, final, total_in = await asyncio.to_thread(
-                CareerManager.run_compound_career, sequence_config, slider_start_ga.value, slider_years.value, slider_freq.value,
-                slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
-            )
-            
-            chart_single_container.clear()
-            with chart_single_container:
-                res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
-                ui.label(f"Single Result: €{final:,.0f}").classes(f'text-lg font-bold {res_color} mb-1')
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
-                for leg in legs[:-1]:
-                    fig.add_hline(y=leg['target'], line_dash="dash", line_color="yellow")
-                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
-                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
-
-        except Exception as e:
-            ui.notify(str(e), type='negative')
-            print(traceback.format_exc())
-
     async def run_simulation():
         try:
             if not legs:
@@ -394,8 +364,9 @@ def show_career_mode():
                 sim1_log = valid_results[0]['log']
                 sim1_final = valid_results[0]['final']
 
-                chart_single_container.clear()
-                with chart_single_container:
+                # Create a dedicated container for single sim that can be refreshed
+                single_sim_chart = ui.column().classes('w-full')
+                with single_sim_chart:
                     res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
                     ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
 
@@ -408,7 +379,38 @@ def show_career_mode():
                     fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                     ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
 
-                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2 mb-4')
+                # Refresh function that updates the single sim chart
+                async def refresh_single():
+                    if not legs: return
+                    try:
+                        profile = load_profile()
+                        saved_strats = profile.get('saved_strategies', {})
+                        refresh_config = []
+                        for leg in legs:
+                            cfg = saved_strats.get(leg['strategy'])
+                            refresh_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
+                        
+                        traj, log, final, total_in = await asyncio.to_thread(
+                            CareerManager.run_compound_career, refresh_config, slider_start_ga.value, slider_years.value, slider_freq.value,
+                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0
+                        )
+                        
+                        single_sim_chart.clear()
+                        with single_sim_chart:
+                            res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
+                            ui.label(f"Result: €{final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+                            for leg in legs[:-1]:
+                                fig.add_hline(y=leg['target'], line_dash="dash", line_color="yellow")
+                            fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                            ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+
+                    except Exception as e:
+                        ui.notify(str(e), type='negative')
+                        print(traceback.format_exc())
+
+                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single).props('flat color=cyan dense').classes('mt-2 mb-4')
 
                 # CSV Export for AI Analysis
                 with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
