@@ -603,6 +603,19 @@ def show_simulator():
             lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
             lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
             lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+            
+            # Doctrine Engine Configuration
+            if overrides.doctrine_enabled:
+                lines.append("\n=== DOCTRINE ENGINE v1.0 (ENABLED) ===")
+                lines.append(f"PLATINUM: Stop={overrides.doctrine_pl_stop}u | Target={overrides.doctrine_pl_target}u | Press={overrides.doctrine_pl_press_wins}/{overrides.doctrine_pl_press_depth} | Iron={overrides.doctrine_pl_iron}")
+                lines.append(f"TIGHT: Stop={overrides.doctrine_ti_stop}u | Target={overrides.doctrine_ti_target}u | Press={overrides.doctrine_ti_press_wins}/{overrides.doctrine_ti_press_depth} | Iron={overrides.doctrine_ti_iron}")
+                lines.append(f"Triggers: Loss>{overrides.doctrine_loss_trigger}u | DD%>{overrides.doctrine_dd_pct_trigger*100:.0f}% | DD€>{overrides.doctrine_dd_eur_trigger:.0f}")
+                lines.append(f"TIGHT Limits: Min={overrides.doctrine_tight_min} | Max={overrides.doctrine_tight_max} sessions")
+                if overrides.doctrine_cooloff_enabled:
+                    lines.append(f"COOL-OFF: Floor=€{overrides.doctrine_cooloff_floor:.0f} | Recovery<{overrides.doctrine_cooloff_recovery_pct*100:.0f}% | Min={overrides.doctrine_cooloff_min_months}mo")
+            else:
+                lines.append("\n=== DOCTRINE ENGINE: DISABLED ===")
+            
             lines.append("\n=== PERFORMANCE RESULTS ===")
             lines.append(f"Total Survival Rate: {score_survival:.1f}%")
             lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")

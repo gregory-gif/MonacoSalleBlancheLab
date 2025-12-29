@@ -913,6 +913,20 @@ def show_roulette_sim():
                 lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
                 lines.append(f"Gold Probability: {gold_prob:.1f}%")
                 
+                # Doctrine Engine Configuration
+                if overrides.doctrine_enabled:
+                    lines.append("\n=== DOCTRINE ENGINE v1.0 (ENABLED) ===")
+                    lines.append(f"PLATINUM: Stop={overrides.doctrine_pl_stop}u | Target={overrides.doctrine_pl_target}u | Press={overrides.doctrine_pl_press_wins}/{overrides.doctrine_pl_press_depth} | Iron={overrides.doctrine_pl_iron}")
+                    lines.append(f"TIGHT: Stop={overrides.doctrine_ti_stop}u | Target={overrides.doctrine_ti_target}u | Press={overrides.doctrine_ti_press_wins}/{overrides.doctrine_ti_press_depth} | Iron={overrides.doctrine_ti_iron}")
+                    lines.append(f"Triggers: Loss>{overrides.doctrine_loss_trigger}u | DD%>{overrides.doctrine_dd_pct_trigger*100:.0f}% | DD€>{overrides.doctrine_dd_eur_trigger:.0f}")
+                    lines.append(f"TIGHT Limits: Min={overrides.doctrine_tight_min} | Max={overrides.doctrine_tight_max} sessions")
+                    if overrides.doctrine_cooloff_enabled:
+                        lines.append(f"COOL-OFF: Floor=€{overrides.doctrine_cooloff_floor:.0f} | Recovery<{overrides.doctrine_cooloff_recovery_pct*100:.0f}% | Min={overrides.doctrine_cooloff_min_months}mo")
+                    if overrides.doctrine_link_roulette:
+                        lines.append(f"Roulette Coupling: PLATINUM={overrides.doctrine_roulette_pl}x | TIGHT={overrides.doctrine_roulette_ti}x | COOLOFF={overrides.doctrine_roulette_co}x")
+                else:
+                    lines.append("\n=== DOCTRINE ENGINE: DISABLED ===")
+                
                 lines.append("\n=== PERFORMANCE RESULTS ===")
                 lines.append(f"Year 1 Survival Rate: {y1_survival_rate:.1f}%")
                 lines.append(f"Total Survival Rate: {score_survival:.1f}% (GA >= €{config['insolvency']})")
