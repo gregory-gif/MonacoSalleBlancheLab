@@ -433,12 +433,47 @@ def show_roulette_sim():
                 'smart_exit_en': switch_smart_exit.value, 'smart_window': slider_smart_window.value,
                 'smart_min_lock': slider_min_lock.value, 'smart_trail_pct': slider_trail_pct.value,
                 
-                # SPICE FIELDS
+                # SPICE FIELDS - Global
+                'spice_global_max_session': slider_spice_global_max_session.value,
+                'spice_global_max_spin': slider_spice_global_max_spin.value,
+                'spice_disable_caroline': switch_spice_disable_caroline.value,
+                'spice_disable_neg_pl': switch_spice_disable_neg_pl.value,
+                'spice_hybrid_mode': switch_spice_hybrid_mode.value,
+                
+                # SPICE FIELDS - Zéro Léger
                 'spice_zero_en': switch_spice_zero.value, 'spice_zero_trig': slider_spice_zero_trig.value,
                 'spice_zero_max': slider_spice_zero_max.value, 'spice_zero_cool': slider_spice_zero_cool.value,
+                'spice_zero_min_pl': slider_spice_zero_min_pl.value, 'spice_zero_max_pl': slider_spice_zero_max_pl.value,
+                
+                # SPICE FIELDS - Jeu Zéro
+                'spice_jeu_zero_en': switch_spice_jeu_zero.value, 'spice_jeu_zero_trig': slider_spice_jeu_zero_trig.value,
+                'spice_jeu_zero_max': slider_spice_jeu_zero_max.value, 'spice_jeu_zero_cool': slider_spice_jeu_zero_cool.value,
+                'spice_jeu_zero_min_pl': slider_spice_jeu_zero_min_pl.value, 'spice_jeu_zero_max_pl': slider_spice_jeu_zero_max_pl.value,
+                
+                # SPICE FIELDS - Zéro Crown
+                'spice_zero_crown_en': switch_spice_zero_crown.value, 'spice_zero_crown_trig': slider_spice_zero_crown_trig.value,
+                'spice_zero_crown_max': slider_spice_zero_crown_max.value, 'spice_zero_crown_cool': slider_spice_zero_crown_cool.value,
+                'spice_zero_crown_min_pl': slider_spice_zero_crown_min_pl.value, 'spice_zero_crown_max_pl': slider_spice_zero_crown_max_pl.value,
+                
+                # SPICE FIELDS - Tiers
                 'spice_tiers_en': switch_spice_tiers.value, 'spice_tiers_trig': slider_spice_tiers_trig.value,
                 'spice_tiers_max': slider_spice_tiers_max.value, 'spice_tiers_cool': slider_spice_tiers_cool.value,
-                'spice_hybrid_mode': switch_spice_hybrid_mode.value,
+                'spice_tiers_min_pl': slider_spice_tiers_min_pl.value, 'spice_tiers_max_pl': slider_spice_tiers_max_pl.value,
+                
+                # SPICE FIELDS - Orphelins
+                'spice_orphelins_en': switch_spice_orphelins.value, 'spice_orphelins_trig': slider_spice_orphelins_trig.value,
+                'spice_orphelins_max': slider_spice_orphelins_max.value, 'spice_orphelins_cool': slider_spice_orphelins_cool.value,
+                'spice_orphelins_min_pl': slider_spice_orphelins_min_pl.value, 'spice_orphelins_max_pl': slider_spice_orphelins_max_pl.value,
+                
+                # SPICE FIELDS - Orphelins en Plein
+                'spice_orphelins_plein_en': switch_spice_orphelins_plein.value, 'spice_orphelins_plein_trig': slider_spice_orphelins_plein_trig.value,
+                'spice_orphelins_plein_max': slider_spice_orphelins_plein_max.value, 'spice_orphelins_plein_cool': slider_spice_orphelins_plein_cool.value,
+                'spice_orphelins_plein_min_pl': slider_spice_orphelins_plein_min_pl.value, 'spice_orphelins_plein_max_pl': slider_spice_orphelins_plein_max_pl.value,
+                
+                # SPICE FIELDS - Voisins
+                'spice_voisins_en': switch_spice_voisins.value, 'spice_voisins_trig': slider_spice_voisins_trig.value,
+                'spice_voisins_max': slider_spice_voisins_max.value, 'spice_voisins_cool': slider_spice_voisins_cool.value,
+                'spice_voisins_min_pl': slider_spice_voisins_min_pl.value, 'spice_voisins_max_pl': slider_spice_voisins_max_pl.value,
                 
                 # DOCTRINE FIELDS
                 'doctrine_en': switch_doctrine_enabled.value,
@@ -512,18 +547,68 @@ def show_roulette_sim():
             slider_min_lock.value = config.get('smart_min_lock', 20)
             slider_trail_pct.value = config.get('smart_trail_pct', 0.20)
             
-            # SPICE LOADS
+            # SPICE LOADS - Global
+            slider_spice_global_max_session.value = config.get('spice_global_max_session', 3)
+            slider_spice_global_max_spin.value = config.get('spice_global_max_spin', 1)
+            switch_spice_disable_caroline.value = config.get('spice_disable_caroline', True)
+            switch_spice_disable_neg_pl.value = config.get('spice_disable_neg_pl', True)
+            switch_spice_hybrid_mode.value = config.get('spice_hybrid_mode', False)
+            
+            # SPICE LOADS - Zéro Léger
             switch_spice_zero.value = config.get('spice_zero_en', False)
             slider_spice_zero_trig.value = config.get('spice_zero_trig', 15)
             slider_spice_zero_max.value = config.get('spice_zero_max', 2)
-            slider_spice_zero_cool.value = config.get('spice_zero_cool', 10)
+            slider_spice_zero_cool.value = config.get('spice_zero_cool', 5)
+            slider_spice_zero_min_pl.value = config.get('spice_zero_min_pl', 15)
+            slider_spice_zero_max_pl.value = config.get('spice_zero_max_pl', 80)
             
+            # SPICE LOADS - Jeu Zéro
+            switch_spice_jeu_zero.value = config.get('spice_jeu_zero_en', False)
+            slider_spice_jeu_zero_trig.value = config.get('spice_jeu_zero_trig', 15)
+            slider_spice_jeu_zero_max.value = config.get('spice_jeu_zero_max', 2)
+            slider_spice_jeu_zero_cool.value = config.get('spice_jeu_zero_cool', 5)
+            slider_spice_jeu_zero_min_pl.value = config.get('spice_jeu_zero_min_pl', 15)
+            slider_spice_jeu_zero_max_pl.value = config.get('spice_jeu_zero_max_pl', 80)
+            
+            # SPICE LOADS - Zéro Crown
+            switch_spice_zero_crown.value = config.get('spice_zero_crown_en', False)
+            slider_spice_zero_crown_trig.value = config.get('spice_zero_crown_trig', 15)
+            slider_spice_zero_crown_max.value = config.get('spice_zero_crown_max', 2)
+            slider_spice_zero_crown_cool.value = config.get('spice_zero_crown_cool', 5)
+            slider_spice_zero_crown_min_pl.value = config.get('spice_zero_crown_min_pl', 15)
+            slider_spice_zero_crown_max_pl.value = config.get('spice_zero_crown_max_pl', 80)
+            
+            # SPICE LOADS - Tiers
             switch_spice_tiers.value = config.get('spice_tiers_en', False)
             slider_spice_tiers_trig.value = config.get('spice_tiers_trig', 25)
             slider_spice_tiers_max.value = config.get('spice_tiers_max', 1)
-            slider_spice_tiers_cool.value = config.get('spice_tiers_cool', 10)
+            slider_spice_tiers_cool.value = config.get('spice_tiers_cool', 8)
+            slider_spice_tiers_min_pl.value = config.get('spice_tiers_min_pl', 25)
+            slider_spice_tiers_max_pl.value = config.get('spice_tiers_max_pl', 80)
             
-            switch_spice_hybrid_mode.value = config.get('spice_hybrid_mode', False)
+            # SPICE LOADS - Orphelins
+            switch_spice_orphelins.value = config.get('spice_orphelins_en', False)
+            slider_spice_orphelins_trig.value = config.get('spice_orphelins_trig', 25)
+            slider_spice_orphelins_max.value = config.get('spice_orphelins_max', 1)
+            slider_spice_orphelins_cool.value = config.get('spice_orphelins_cool', 8)
+            slider_spice_orphelins_min_pl.value = config.get('spice_orphelins_min_pl', 25)
+            slider_spice_orphelins_max_pl.value = config.get('spice_orphelins_max_pl', 80)
+            
+            # SPICE LOADS - Orphelins en Plein
+            switch_spice_orphelins_plein.value = config.get('spice_orphelins_plein_en', False)
+            slider_spice_orphelins_plein_trig.value = config.get('spice_orphelins_plein_trig', 35)
+            slider_spice_orphelins_plein_max.value = config.get('spice_orphelins_plein_max', 1)
+            slider_spice_orphelins_plein_cool.value = config.get('spice_orphelins_plein_cool', 10)
+            slider_spice_orphelins_plein_min_pl.value = config.get('spice_orphelins_plein_min_pl', 35)
+            slider_spice_orphelins_plein_max_pl.value = config.get('spice_orphelins_plein_max_pl', 100)
+            
+            # SPICE LOADS - Voisins
+            switch_spice_voisins.value = config.get('spice_voisins_en', False)
+            slider_spice_voisins_trig.value = config.get('spice_voisins_trig', 35)
+            slider_spice_voisins_max.value = config.get('spice_voisins_max', 1)
+            slider_spice_voisins_cool.value = config.get('spice_voisins_cool', 10)
+            slider_spice_voisins_min_pl.value = config.get('spice_voisins_min_pl', 35)
+            slider_spice_voisins_max_pl.value = config.get('spice_voisins_max_pl', 100)
             
             # DOCTRINE LOADS
             switch_doctrine_enabled.value = config.get('doctrine_en', False)
