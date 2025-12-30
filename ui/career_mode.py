@@ -591,7 +591,7 @@ def show_career_mode():
                 for leg in legs[:-1]:
                     fig_multi.add_hline(y=leg['target'], line_dash="dash", line_color="white", opacity=0.3)
 
-                fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                fig_multi.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                 ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
 
                 # YOUR REALITY section - placed before CSV tools
@@ -641,8 +641,11 @@ def show_career_mode():
                                     hoverinfo='text'
                                 ))
 
-                    fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                    fig_single.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                     ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
+                
+                # REFRESH BUTTON right below the chart
+                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single).props('flat color=cyan dense').classes('mt-2 mb-4')
 
                 # Refresh function that updates the single sim chart
                 async def refresh_single():
@@ -709,14 +712,12 @@ def show_career_mode():
                                             hoverinfo='text'
                                         ))
                             
-                            fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                            fig.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                             ui.plotly(fig).classes('w-full border border-slate-700 rounded')
 
                     except Exception as e:
                         ui.notify(str(e), type='negative')
                         print(traceback.format_exc())
-
-                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single).props('flat color=cyan dense').classes('mt-2 mb-4')
 
                 # CSV Export for AI Analysis
                 with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
@@ -884,60 +885,65 @@ Trailing_Fallback,{slider_trailing_fallback.value}"""
             progress.set_visibility(False)
 
     # --- UI LAYOUT ---
-    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
+    with ui.column().classes('w-full max-w-7xl mx-auto gap-6 p-4'):
         ui.label('CAREER SIMULATOR (MULTI-STAGE)').classes('text-2xl font-light text-purple-300')
         ui.label('Chain strategies. Analyze Probability (Multiverse) vs Reality (Single).').classes('text-sm text-slate-500 -mt-4')
         
-        with ui.grid(columns=2).classes('w-full gap-6'):
-            # LEFT: CONTROLS
-            with ui.card().classes('w-full bg-slate-900 p-4'):
-                ui.label('1. BUILD SEQUENCE').classes('font-bold text-white mb-2')
-                
-                profile = load_profile()
-                saved = list(profile.get('saved_strategies', {}).keys())
-                
-                select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
-                ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
-                slider_target = ui.slider(min=2000, max=100000, step=1000, value=10000).props('color=yellow')
-                ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
-                
-                ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
-                
-                ui.separator().classes('bg-slate-700 my-4')
-                
-                ui.label('2. GLOBAL SETTINGS').classes('font-bold text-white mb-2')
-                slider_start_ga = ui.slider(min=1000, max=50000, value=2000).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'Start: €{v}')
-                slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
-                slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
-                
-                ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
-                slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
-                ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
-                
-                ui.separator().classes('bg-slate-700 my-4')
-                ui.label('🔄 FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
-                ui.label('Fallback Threshold (% below promotion)').classes('text-xs text-slate-400')
-                slider_fallback = ui.slider(min=60, max=95, value=80, step=5).props('color=orange')
-                ui.label().bind_text_from(slider_fallback, 'value', lambda v: f'{v}% - Demote if bankroll drops below this')
-                
-                ui.label('Promotion Buffer (% above target)').classes('text-xs text-slate-400 mt-2')
-                slider_promotion_buffer = ui.slider(min=100, max=150, value=120, step=5).props('color=yellow')
-                ui.label().bind_text_from(slider_promotion_buffer, 'value', lambda v: f'{v}% - Promote when this reached')
-                
-                ui.separator().classes('bg-slate-700 my-2')
-                ui.label('🔄 TRAILING FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
-                ui.label('Trailing Fallback (% from peak after promotion)').classes('text-xs text-slate-400')
-                slider_trailing_fallback = ui.slider(min=85, max=98, value=90, step=1).props('color=deep-orange')
-                ui.label().bind_text_from(slider_trailing_fallback, 'value', lambda v: f'{v}% - Trailing stop from peak')
-                
-                ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
+        # SETTINGS CARD AT TOP
+        with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
+            with ui.grid(columns=2).classes('w-full gap-6'):
+                # LEFT: CONTROLS
+                with ui.column().classes('w-full'):
+                    ui.label('1. BUILD SEQUENCE').classes('font-bold text-white mb-2')
+                    
+                    profile = load_profile()
+                    saved = list(profile.get('saved_strategies', {}).keys())
+                    
+                    select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
+                    ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
+                    slider_target = ui.slider(min=2000, max=100000, step=1000, value=10000).props('color=yellow')
+                    ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
+                    
+                    ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
+                    
+                    ui.separator().classes('bg-slate-700 my-4')
+                    
+                    ui.label('2. GLOBAL SETTINGS').classes('font-bold text-white mb-2')
+                    slider_start_ga = ui.slider(min=1000, max=50000, value=2000).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'Start: €{v}')
+                    slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
+                    slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
+                    
+                    ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
+                    slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
+                    ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
+                    
+                    ui.separator().classes('bg-slate-700 my-4')
+                    ui.label('🔄 FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
+                    ui.label('Fallback Threshold (% below promotion)').classes('text-xs text-slate-400')
+                    slider_fallback = ui.slider(min=60, max=95, value=80, step=5).props('color=orange')
+                    ui.label().bind_text_from(slider_fallback, 'value', lambda v: f'{v}% - Demote if bankroll drops below this')
+                    
+                    ui.label('Promotion Buffer (% above target)').classes('text-xs text-slate-400 mt-2')
+                    slider_promotion_buffer = ui.slider(min=100, max=150, value=120, step=5).props('color=yellow')
+                    ui.label().bind_text_from(slider_promotion_buffer, 'value', lambda v: f'{v}% - Promote when this reached')
+                    
+                    ui.separator().classes('bg-slate-700 my-2')
+                    ui.label('🔄 TRAILING FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
+                    ui.label('Trailing Fallback (% from peak after promotion)').classes('text-xs text-slate-400')
+                    slider_trailing_fallback = ui.slider(min=85, max=98, value=90, step=1).props('color=deep-orange')
+                    ui.label().bind_text_from(slider_trailing_fallback, 'value', lambda v: f'{v}% - Trailing stop from peak')
 
-            # RIGHT: SEQUENCE VIEW
-            with ui.column().classes('w-full'):
-                ui.label('CAREER PATH').classes('font-bold text-white mb-2')
-                legs_container = ui.column().classes('w-full')
-                progress = ui.linear_progress().props('indeterminate color=purple').classes('w-full'); progress.set_visibility(False)
-                results_area = ui.column().classes('w-full')
-                chart_single_container = ui.column().classes('w-full')
+                # RIGHT: SEQUENCE VIEW
+                with ui.column().classes('w-full'):
+                    ui.label('CAREER PATH').classes('font-bold text-white mb-2')
+                    legs_container = ui.column().classes('w-full')
+            
+            ui.separator().classes('bg-slate-700 my-4')
+            ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full')
+        
+        # RESULTS AREA BELOW SETTINGS
+        progress = ui.linear_progress().props('indeterminate color=purple').classes('w-full'); progress.set_visibility(False)
+        results_area = ui.column().classes('w-full')
+        chart_single_container = ui.column().classes('w-full')
 
     refresh_leg_ui()
