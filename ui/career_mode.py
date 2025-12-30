@@ -88,13 +88,14 @@ class CareerManager:
                 fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
                 
                 # Trailing fallback check - if enabled and we drop X% from peak
-                trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else float('inf')
+                trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else 0
                 
-                if current_ga < min(fallback_threshold, trailing_threshold):
+                # Use MAX to trigger on whichever threshold is MORE protective (higher)
+                if current_ga < max(fallback_threshold, trailing_threshold):
                     # Determine which mechanism triggered
                     mechanism = "STANDARD"
                     threshold_value = fallback_threshold
-                    if trailing_active[current_leg_idx] and trailing_threshold < fallback_threshold:
+                    if trailing_active[current_leg_idx] and trailing_threshold > fallback_threshold:
                         mechanism = "🔄 TRAILING"
                         threshold_value = trailing_threshold
                     
@@ -254,13 +255,14 @@ class CareerManager:
                     
                     # Check both fallback mechanisms BEFORE session starts
                     fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
-                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else float('inf')
+                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else 0
                     
-                    if current_ga < min(fallback_threshold, trailing_threshold):
+                    # Use MAX to trigger on whichever threshold is MORE protective (higher)
+                    if current_ga < max(fallback_threshold, trailing_threshold):
                         # Determine which mechanism triggered
                         mechanism = "STANDARD"
                         threshold_value = fallback_threshold
-                        if trailing_active[current_leg_idx] and trailing_threshold < fallback_threshold:
+                        if trailing_active[current_leg_idx] and trailing_threshold > fallback_threshold:
                             mechanism = "🔄 TRAILING"
                             threshold_value = trailing_threshold
                         
@@ -332,13 +334,14 @@ class CareerManager:
                     
                     # Check both fallback mechanisms
                     fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
-                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else float('inf')
+                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else 0
                     
-                    if current_ga < min(fallback_threshold, trailing_threshold):
+                    # Use MAX to trigger on whichever threshold is MORE protective (higher)
+                    if current_ga < max(fallback_threshold, trailing_threshold):
                         # Determine which mechanism triggered
                         mechanism = "STANDARD"
                         threshold_value = fallback_threshold
-                        if trailing_active[current_leg_idx] and trailing_threshold < fallback_threshold:
+                        if trailing_active[current_leg_idx] and trailing_threshold > fallback_threshold:
                             mechanism = "🔄 TRAILING"
                             threshold_value = trailing_threshold
                         
