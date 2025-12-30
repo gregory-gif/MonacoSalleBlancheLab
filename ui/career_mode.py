@@ -643,9 +643,6 @@ def show_career_mode():
 
                     fig_single.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                     ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
-                
-                # REFRESH BUTTON right below the chart
-                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single).props('flat color=cyan dense').classes('mt-2 mb-4')
 
                 # Refresh function that updates the single sim chart
                 async def refresh_single():
@@ -718,6 +715,9 @@ def show_career_mode():
                     except Exception as e:
                         ui.notify(str(e), type='negative')
                         print(traceback.format_exc())
+                
+                # REFRESH BUTTON right below the chart (placed after function definition)
+                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single).props('flat color=cyan dense').classes('mt-2 mb-4')
 
                 # CSV Export for AI Analysis
                 with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
