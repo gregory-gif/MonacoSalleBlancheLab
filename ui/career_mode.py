@@ -600,12 +600,17 @@ def show_career_mode():
                 sim1_traj = valid_results[0]['trajectory']
                 sim1_log = valid_results[0]['log']
                 sim1_final = valid_results[0]['final']
+                sim1_monthly_cost = valid_results[0]['monthly_cost']
 
                 # Create a dedicated container for single sim that can be refreshed
                 single_sim_chart = ui.column().classes('w-full')
                 with single_sim_chart:
                     res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
                     ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                    
+                    # Display monthly cost
+                    cost_color = "text-red-400" if sim1_monthly_cost > 0 else "text-green-400"
+                    ui.label(f"Average Monthly Cost: €{sim1_monthly_cost:,.2f}").classes(f'text-sm font-semibold {cost_color} mb-2')
 
                     fig_single = go.Figure()
                     fig_single.add_trace(go.Scatter(y=sim1_traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
@@ -633,10 +638,18 @@ def show_career_mode():
                             slider_trailing_fallback.value / 100.0
                         )
                         
+                        # Calculate monthly cost for refreshed data
+                        net_cost = total_in - final
+                        monthly_cost = net_cost / (slider_years.value * 12)
+                        
                         single_sim_chart.clear()
                         with single_sim_chart:
                             res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
                             ui.label(f"Result: €{final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                            
+                            # Display monthly cost
+                            cost_color = "text-red-400" if monthly_cost > 0 else "text-green-400"
+                            ui.label(f"Average Monthly Cost: €{monthly_cost:,.2f}").classes(f'text-sm font-semibold {cost_color} mb-2')
                             
                             # Add doctrine stats if available
                             if doctrine_summary:

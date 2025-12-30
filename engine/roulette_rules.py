@@ -45,6 +45,7 @@ class RouletteSessionState:
     # Progressions
     dalembert_level: int = 0 
     caroline_level: int = 0
+    neg_caroline_level: int = 0  # Negative Caroline (1-1-2-3-4 on losses)
     
     # Spice Engine v5.0
     spice_engine: any = None  # Will hold SpiceEngine instance
@@ -89,6 +90,12 @@ class RouletteStrategist:
         if press_mode == 5:
             seq = [1, 1, 2, 3, 4]
             idx = min(state.caroline_level, 4)
+            bet = base_val * seq[idx]
+
+        # --- NEGATIVE CAROLINE (1-1-2-3-4 on losses) ---
+        elif press_mode == 6:
+            seq = [1, 1, 2, 3, 4]
+            idx = min(state.neg_caroline_level, 4)
             bet = base_val * seq[idx]
 
         # --- CAPPED D'ALEMBERT ---
@@ -216,6 +223,13 @@ class RouletteStrategist:
                 if state.caroline_level > 4: state.caroline_level = 4
             elif lost:
                 state.caroline_level = 0
+        
+        elif state.overrides.press_trigger_wins == 6: # Negative Caroline
+            if lost:
+                state.neg_caroline_level += 1
+                if state.neg_caroline_level > 4: state.neg_caroline_level = 4
+            elif won:
+                state.neg_caroline_level = 0
         
         elif state.overrides.press_trigger_wins == 4: # D'Alembert
             if won:
