@@ -617,6 +617,29 @@ def show_career_mode():
 
                     for leg in legs[:-1]:
                         fig_single.add_hline(y=leg['target'], line_dash="dash", line_color="yellow", annotation_text=f"Switch")
+                    
+                    # Add visual markers for FALLBACK events
+                    for event in sim1_log:
+                        if event['event'] == 'FALLBACK':
+                            month_idx = event['month'] - 1
+                            if 0 <= month_idx < len(sim1_traj):
+                                # Determine marker color based on fallback type
+                                is_trailing = '🔄 TRAILING' in event['details']
+                                marker_color = 'orange' if is_trailing else 'red'
+                                marker_symbol = 'triangle-down' if is_trailing else 'circle'
+                                label = 'Trailing FB' if is_trailing else 'Standard FB'
+                                
+                                # Add a marker at the fallback point
+                                fig_single.add_trace(go.Scatter(
+                                    x=[month_idx],
+                                    y=[sim1_traj[month_idx]],
+                                    mode='markers',
+                                    marker=dict(size=12, color=marker_color, symbol=marker_symbol, line=dict(width=2, color='white')),
+                                    name=label,
+                                    showlegend=True,
+                                    hovertext=event['details'],
+                                    hoverinfo='text'
+                                ))
 
                     fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                     ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
@@ -662,6 +685,30 @@ def show_career_mode():
                             fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
                             for leg in legs[:-1]:
                                 fig.add_hline(y=leg['target'], line_dash="dash", line_color="yellow")
+                            
+                            # Add visual markers for FALLBACK events
+                            for event in log:
+                                if event['event'] == 'FALLBACK':
+                                    month_idx = event['month'] - 1
+                                    if 0 <= month_idx < len(traj):
+                                        # Determine marker color based on fallback type
+                                        is_trailing = '🔄 TRAILING' in event['details']
+                                        marker_color = 'orange' if is_trailing else 'red'
+                                        marker_symbol = 'triangle-down' if is_trailing else 'circle'
+                                        label = 'Trailing FB' if is_trailing else 'Standard FB'
+                                        
+                                        # Add a marker at the fallback point
+                                        fig.add_trace(go.Scatter(
+                                            x=[month_idx],
+                                            y=[traj[month_idx]],
+                                            mode='markers',
+                                            marker=dict(size=12, color=marker_color, symbol=marker_symbol, line=dict(width=2, color='white')),
+                                            name=label,
+                                            showlegend=True,
+                                            hovertext=event['details'],
+                                            hoverinfo='text'
+                                        ))
+                            
                             fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                             ui.plotly(fig).classes('w-full border border-slate-700 rounded')
 
@@ -809,6 +856,12 @@ Trailing_Fallback,{slider_trailing_fallback.value}"""
                         if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
                         if l['event'] == 'ERROR': color = "text-red-600 font-bold"
                         if l['event'] == 'DOCTRINE': color = "text-purple-400 font-bold"
+                        if l['event'] == 'FALLBACK':
+                            # Distinguish between trailing and standard fallback
+                            if '🔄 TRAILING' in l['details']:
+                                color = "text-orange-400 font-bold"
+                            else:
+                                color = "text-red-400 font-bold"
                         ui.label(f"M{l['month']} | {l['event']}: {l['details']}").classes(f'text-xs {color}')
                 
                 # Doctrine Summary for Sim #1
