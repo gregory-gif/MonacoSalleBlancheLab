@@ -71,9 +71,18 @@ class CareerManager:
             # 1. CHECK FOR DEMOTION (Fallback to previous strategy if bankroll drops too low)
             if current_leg_idx > 0:
                 # Update trailing peak if we've reached new high in current leg
+                old_peak = trailing_peak[current_leg_idx]
                 if current_ga > trailing_peak[current_leg_idx]:
                     trailing_peak[current_leg_idx] = current_ga
                     trailing_active[current_leg_idx] = True  # Activate trailing once we exceed promotion threshold
+                    
+                    # Log peak update
+                    new_threshold = current_ga * trailing_fallback_pct
+                    log.append({
+                        'month': m+1,
+                        'event': 'PEAK_UPDATE',
+                        'details': f"New Peak: €{current_ga:,.0f} (was €{old_peak:,.0f}), Trailing FB @ €{new_threshold:,.0f}"
+                    })
                 
                 # Standard fallback check
                 fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
@@ -133,10 +142,13 @@ class CareerManager:
                     trailing_peak[current_leg_idx] = current_ga
                     trailing_active[current_leg_idx] = True
                     
+                    # Calculate what the trailing threshold will be
+                    trailing_threshold_value = current_ga * trailing_fallback_pct
+                    
                     log.append({
                         'month': m+1, 
                         'event': 'PROMOTION', 
-                        'details': f"GRADUATED: {active_strategy_name} -> {new_leg['strategy_name']} (Bal: €{current_ga:,.0f})"
+                        'details': f"GRADUATED: {active_strategy_name} -> {new_leg['strategy_name']} (Bal: €{current_ga:,.0f}, Trailing FB will trigger @ €{trailing_threshold_value:,.0f})"
                     })
                     
                     active_strategy_name = new_leg['strategy_name']
@@ -857,6 +869,7 @@ Trailing_Fallback,{slider_trailing_fallback.value}"""
                         if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
                         if l['event'] == 'ERROR': color = "text-red-600 font-bold"
                         if l['event'] == 'DOCTRINE': color = "text-purple-400 font-bold"
+                        if l['event'] == 'PEAK_UPDATE': color = "text-green-400"
                         if l['event'] == 'FALLBACK':
                             # Distinguish between trailing and standard fallback
                             if '🔄 TRAILING' in l['details']:
