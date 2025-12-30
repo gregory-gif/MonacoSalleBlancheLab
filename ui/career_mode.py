@@ -317,8 +317,18 @@ class CareerManager:
                 if current_leg_idx > 0:
                     # Update trailing peak if we've reached new high
                     if current_ga > trailing_peak[current_leg_idx]:
+                        old_peak = trailing_peak[current_leg_idx]
                         trailing_peak[current_leg_idx] = current_ga
                         trailing_active[current_leg_idx] = True
+                        
+                        # Log significant peak updates (only if increase is meaningful, e.g., >1%)
+                        if (current_ga - old_peak) / old_peak > 0.01:
+                            new_threshold = current_ga * trailing_fallback_pct
+                            log.append({
+                                'month': m+1,
+                                'event': 'PEAK_UPDATE',
+                                'details': f"New Peak: €{current_ga:,.0f} (was €{old_peak:,.0f}), Trailing FB @ €{new_threshold:,.0f}"
+                            })
                     
                     # Check both fallback mechanisms
                     fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
