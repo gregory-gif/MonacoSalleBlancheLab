@@ -46,6 +46,8 @@ class RouletteSessionState:
     dalembert_level: int = 0 
     caroline_level: int = 0
     neg_caroline_level: int = 0  # Negative Caroline (1-1-2-3-4 on losses)
+    neg_snapback_level: int = 0  # Negatif 1-2-4-7 Snap-Back (on losses)
+    bet_in_progression: int = -1  # Which bet (0 or 1) is currently in progression (-1 = none)
     
     # Spice Engine v5.0
     spice_engine: any = None  # Will hold SpiceEngine instance
@@ -98,6 +100,12 @@ class RouletteStrategist:
             idx = min(state.neg_caroline_level, 4)
             bet = base_val * seq[idx]
 
+        # --- NEGATIF 1-2-4-7 SNAP-BACK (on losses) ---
+        elif press_mode == 7:
+            seq = [1, 2, 4, 7]
+            idx = min(state.neg_snapback_level, 3)
+            bet = base_val * seq[idx]
+
         # --- CAPPED D'ALEMBERT ---
         elif press_mode == 4:
             step_size = base_val
@@ -119,6 +127,84 @@ class RouletteStrategist:
                 bet = base_val + (press_steps * state.tier.press_unit)
 
         return {'mode': 'PLAYING', 'bet': bet, 'reason': 'ACTION'}
+
+    @staticmethod
+    def resolve_spin_with_individual_tracking(state, bet_types: list, main_bet_amount: float):
+        """
+        Resolve spin with individual bet tracking for dual-bet progressions.
+        Returns: (number, won, net_pnl, individual_bet_results)
+        individual_bet_results: list of (bet_type, pnl, won) for each standard bet
+        """
+        number = random.randint(0, 36)
+        net_pnl = 0.0
+        individual_results = []
+        
+        base_unit = state.tier.base_unit
+        
+        for bt in bet_types:
+            if bt == RouletteBet.SPICE_ZERO:
+                cost = base_unit * 3.0
+                payout = 0.0
+                if number == 26: payout = (base_unit * 35) + base_unit
+                elif number in [0, 3]: payout = (base_unit * 17) + base_unit
+                elif number in [32, 35]: payout = (base_unit * 17) + base_unit
+                net_pnl += (payout - cost)
+                
+            elif bt == RouletteBet.SPICE_TIERS:
+                cost = base_unit * 6.0
+                payout = 0.0
+                tiers_nums = {5,8,10,11,13,16,23,24,27,30,33,36}
+                if number in tiers_nums:
+                    payout = (base_unit * 17) + base_unit
+                net_pnl += (payout - cost)
+                
+            elif bt == RouletteBet.STRAT_SALON_LITE:
+                bet_u = main_bet_amount
+                cost = bet_u * 5.0
+                payout = 0.0
+                if number == 26: payout += (bet_u * 35) + bet_u
+                if number in [0, 3]: payout += (bet_u * 17) + bet_u
+                if number in [32, 35]: payout += (bet_u * 17) + bet_u
+                if number in WINNING_NUMBERS[RouletteBet.BLACK]:
+                    payout += (bet_u * 2 * 2) 
+                elif number == 0:
+                    payout += (bet_u * 2 / 2) 
+                net_pnl += (payout - cost)
+                
+            elif bt == RouletteBet.STRAT_FRENCH_LITE:
+                bet_u = main_bet_amount
+                cost = bet_u * 7.0
+                payout = 0.0
+                tiers_nums = {5,8,10,11,13,16,23,24,27,30,33,36}
+                if number in tiers_nums:
+                    payout += (bet_u * 9.0)
+                orph_nums = {1,6,9,14,17,20,31,34}
+                if number in orph_nums:
+                    payout += (bet_u * 14.4) 
+                if number in WINNING_NUMBERS[RouletteBet.BLACK]:
+                    payout += (bet_u * 4.0) 
+                elif number == 0:
+                    payout += (bet_u * 1.0) 
+                net_pnl += (payout - cost)
+                
+            # Standard bets - track individually
+            else:
+                pnl_change = 0
+                if number == 0:
+                    pnl_change = -(main_bet_amount / 2.0) 
+                else:
+                    winning_set = WINNING_NUMBERS[bt]
+                    if number in winning_set:
+                        pnl_change = main_bet_amount
+                    else:
+                        pnl_change = -main_bet_amount
+                net_pnl += pnl_change
+                individual_results.append((bt, pnl_change, pnl_change > 0))
+        
+        state.session_pnl += net_pnl
+        won = (net_pnl > 0)
+        
+        return number, won, net_pnl, individual_results
 
     @staticmethod
     def resolve_spin(state, bet_types: list, main_bet_amount: float):
@@ -230,6 +316,13 @@ class RouletteStrategist:
                 if state.neg_caroline_level > 4: state.neg_caroline_level = 4
             elif won:
                 state.neg_caroline_level = 0
+        
+        elif state.overrides.press_trigger_wins == 7: # Negatif 1-2-4-7 Snap-Back
+            if lost:
+                state.neg_snapback_level += 1
+                if state.neg_snapback_level > 3: state.neg_snapback_level = 3
+            elif won:
+                state.neg_snapback_level = 0
         
         elif state.overrides.press_trigger_wins == 4: # D'Alembert
             if won:

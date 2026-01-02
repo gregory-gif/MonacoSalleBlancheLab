@@ -72,12 +72,21 @@ class RouletteWorker:
             b2 = BET_MAP.get(overrides.bet_strategy_2)
             active_main_bets.append(b2)
         
+        # For Negatif Snap-Back: track individual bet results
+        use_snapback_halt = (session_overrides.press_trigger_wins == 7 and len(active_main_bets) == 2)
+        
         while state.current_spin <= spins_limit and state.mode != 'STOPPED':
             decision = RouletteStrategist.get_next_decision(state)
             if decision['mode'] == 'STOPPED': break
             
             unit_amt = decision['bet']
             current_bets = active_main_bets.copy()
+            
+            # === NEGATIF SNAP-BACK: HALT SECOND BET WHEN FIRST IS IN PROGRESSION ===
+            if use_snapback_halt:
+                if state.bet_in_progression >= 0:
+                    # One bet is in progression, only bet on that one
+                    current_bets = [active_main_bets[state.bet_in_progression]]
             
             # === SPICE SYSTEM v5.0: EVALUATE AND FIRE ===
             spice_engine.reset_spin()
@@ -112,8 +121,37 @@ class RouletteWorker:
             
             volume += (unit_amt * total_main_units)
             
-            # Resolve main bets
-            number, won_main, pnl_main = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
+            # Resolve main bets (with individual tracking for snap-back)
+            if use_snapback_halt:
+                number, won_main, pnl_main, individual_results = RouletteStrategist.resolve_spin_with_individual_tracking(state, current_bets, unit_amt)
+                
+                # Update snap-back progression state based on individual results
+                if state.bet_in_progression == -1:
+                    # No bet in progression yet - check if any bet lost
+                    for idx, (bet_type, pnl, won) in enumerate(individual_results):
+                        if not won:
+                            # Find which bet in active_main_bets this corresponds to
+                            for j, active_bet in enumerate(active_main_bets):
+                                if active_bet == bet_type:
+                                    state.bet_in_progression = j
+                                    state.neg_snapback_level = 1  # Start progression at level 1
+                                    break
+                            break
+                else:
+                    # A bet is in progression - check if it won or maxed out
+                    if individual_results:
+                        bet_result = individual_results[0]  # Only one bet active
+                        if bet_result[2]:  # Won
+                            state.neg_snapback_level = 0
+                            state.bet_in_progression = -1  # Resume both bets
+                        else:
+                            # Lost - advance progression
+                            state.neg_snapback_level += 1
+                            if state.neg_snapback_level > 3:  # Failed at max level
+                                state.neg_snapback_level = 0
+                                state.bet_in_progression = -1  # Resume both bets
+            else:
+                number, won_main, pnl_main = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
             
             # Resolve spice bet (if any)
             if fired_spice_type:
@@ -984,7 +1022,9 @@ def show_roulette_sim():
                     2: 'Press 2-Wins', 
                     3: 'Titan Progression', 
                     4: "Capped D'Alembert", 
-                    5: "La Caroline"
+                    5: "La Caroline",
+                    6: "Negative Caroline",
+                    7: "Negatif 1-2-4-7 Snap-Back"
                 }
                 press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
 
@@ -1302,7 +1342,7 @@ def show_roulette_sim():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
