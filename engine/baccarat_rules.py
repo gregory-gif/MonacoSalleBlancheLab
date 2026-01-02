@@ -20,6 +20,13 @@ class BaccaratSessionState:
     # Iron Gate Logic
     is_in_virtual_mode: bool = False
     virtual_loss_counter: int = 0
+    
+    # Tie Bet Logic
+    last_hand_was_tie: bool = False
+    place_tie_bet_this_hand: bool = False
+    tie_count: int = 0  # Total ties occurred
+    tie_bets_placed: int = 0  # Tie bets actually placed
+    tie_bets_pnl: float = 0.0  # P&L from tie bets only
 
 class BaccaratStrategist:
     @staticmethod
@@ -83,7 +90,7 @@ class BaccaratStrategist:
         return {'mode': PlayMode.PLAYING, 'bet_amount': bet, 'reason': 'ACTION', 'bet_target': target}
 
     @staticmethod
-    def update_state_after_hand(state: BaccaratSessionState, won: bool, pnl_change: float):
+    def update_state_after_hand(state: BaccaratSessionState, won: bool, pnl_change: float, was_tie: bool = False):
         if state.is_in_virtual_mode:
             if won:
                 state.is_in_virtual_mode = False
@@ -93,13 +100,23 @@ class BaccaratStrategist:
                 state.virtual_loss_counter += 1
             state.hands_played_total += 1
             state.hands_played_in_shoe += 1
+            state.last_hand_was_tie = was_tie
+            state.place_tie_bet_this_hand = was_tie  # Set flag for next hand
             return 
 
         state.session_pnl += pnl_change
         state.hands_played_total += 1
         state.hands_played_in_shoe += 1
         
-        if pnl_change > 0:
+        # Handle tie bet flag for next hand
+        state.place_tie_bet_this_hand = was_tie
+        state.last_hand_was_tie = was_tie
+        
+        # For win/loss tracking, ties don't count
+        if was_tie:
+            # Tie = push on main bet, no streak impact
+            pass
+        elif pnl_change > 0:
             state.consecutive_losses = 0
             state.current_press_streak += 1
         else:

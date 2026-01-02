@@ -10,7 +10,7 @@ The Year 1 export now provides comprehensive session-level data for complete str
 
 ### Baccarat Export
 ```csv
-Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max
+Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Tie_Count,Tie_Bets,Tie_PL
 ```
 
 ### Roulette Export (with Spice Data)
@@ -42,11 +42,10 @@ Month,Session,Result,Total_Bal,Game_Bal,Spins,Volume,Tier,Exit_Reason,Spice_Coun
 | Field | Type | Description | Example |
 |-------|------|-------------|---------|
 | **Hands** | Integer | Total hands played | `180` |
-
-#### Roulette Only
-| Field | Type | Description | Example |
-|-------|------|-------------|---------|
-| **Spins** | Integer | Total spins played | `120` |
+| **Tie_Count** | Integer | Number of tie outcomes | `15` |
+| **Tie_Bets** | Integer | Number of 1-unit tie bets placed | `14` |
+| **Tie_PL** | Float | P&L from tie bets only | `+24.00` |
+**Tie Betting Logic**: After each tie outcome, the system automatically places a 1 base unit tie bet on the next hand (alongside the normal Banker/Player bet). This exploits the psychological "tie follow" phenomenon. Tie bets pay 8:1 when successful.| **Spins** | Integer | Total spins played | `120` |
 | **Spice_Count** | Integer | Number of spice bets fired | `2` |
 | **Spice_PL** | Float | Net spice P/L (payout - cost) | `+45.00` |
 | **TP_Boosts** | Integer | Number of momentum TP increases | `1` |

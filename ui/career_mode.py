@@ -304,8 +304,8 @@ class CareerManager:
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE (returns 6 values) ---
-                    pnl, vol, used_lvl, hands, exit_reason, press_streak = BaccaratWorker.run_session(
+                    # --- BACCARAT ENGINE (returns 9 values) ---
+                    pnl, vol, used_lvl, hands, exit_reason, press_streak, tie_count, tie_bets, tie_pnl = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 

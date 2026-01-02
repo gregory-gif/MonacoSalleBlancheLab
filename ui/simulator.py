@@ -46,17 +46,56 @@ class BaccaratWorker:
             amt = decision['bet_amount']
             volume += amt
             
-            # Simulation Physics
+            # Check if we should place a tie bet this hand (1 unit after a tie)
+            tie_bet_amt = 0
+            if state.place_tie_bet_this_hand and amt > 0:
+                tie_bet_amt = tier.base_unit  # Always 1 base unit
+                volume += tie_bet_amt
+                state.tie_bets_placed += 1
+            
+            # Simulation Physics - Realistic Baccarat Probabilities
             is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            won = (random.random() < 0.5) 
+            rng = random.random()
+            
+            # Probabilities: Banker 45.86%, Player 44.62%, Tie 9.52%
+            if rng < 0.4586:  # Banker wins
+                outcome = 'BANKER'
+            elif rng < 0.9048:  # Player wins (0.4586 + 0.4462)
+                outcome = 'PLAYER'
+            else:  # Tie
+                outcome = 'TIE'
             
             pnl = 0
-            if won:
-                pnl = amt * 0.95 if is_banker else amt
+            is_tie = False
+            tie_bet_pnl = 0
+            
+            if outcome == 'TIE':
+                # Tie: Main bet pushes (no win/loss), tie bet wins 8:1
+                is_tie = True
+                state.tie_count += 1
+                if tie_bet_amt > 0:
+                    tie_bet_pnl = tie_bet_amt * 8  # Win 8:1 on tie bet
+                    pnl = tie_bet_pnl
             else:
-                pnl = -amt
+                # Main bet resolution
+                main_bet_won = (outcome == 'BANKER' and is_banker) or (outcome == 'PLAYER' and not is_banker)
                 
-            BaccaratStrategist.update_state_after_hand(state, won, pnl)
+                if main_bet_won:
+                    pnl = amt * 0.95 if is_banker else amt
+                else:
+                    pnl = -amt
+                
+                # Tie bet loses if placed
+                if tie_bet_amt > 0:
+                    tie_bet_pnl = -tie_bet_amt
+                    pnl += tie_bet_pnl
+            
+            # Track tie bet P&L separately
+            state.tie_bets_pnl += tie_bet_pnl
+            
+            # Update state with outcome
+            main_bet_won = (outcome == 'BANKER' and is_banker) or (outcome == 'PLAYER' and not is_banker)
+            BaccaratStrategist.update_state_after_hand(state, main_bet_won, pnl, is_tie)
             
             if state.hands_played_in_shoe >= 70:
                 state.current_shoe += 1
@@ -74,7 +113,7 @@ class BaccaratWorker:
             elif state.session_pnl <= state.locked_profit:
                 exit_reason = 'RATCHET'
 
-        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak
+        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak, state.tie_count, state.tie_bets_placed, state.tie_bets_pnl
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -128,7 +167,7 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands, exit_reason, final_streak = BaccaratWorker.run_session(
+                    pnl, vol, used_level, hands, exit_reason, final_streak, tie_count, tie_bets, tie_pnl = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -150,7 +189,10 @@ class BaccaratWorker:
                             'volume': vol,
                             'tier': used_level,
                             'exit': exit_reason,
-                            'streak_max': final_streak
+                            'streak_max': final_streak,
+                            'tie_count': tie_count,
+                            'tie_bets': tie_bets,
+                            'tie_pnl': tie_pnl
                         })
             else:
                  if track_y1_details and m < 12:
@@ -164,7 +206,10 @@ class BaccaratWorker:
                             'volume': 0,
                             'tier': 0,
                             'exit': 'INSOLVENT',
-                            'streak_max': 0
+                            'streak_max': 0,
+                            'tie_count': 0,
+                            'tie_bets': 0,
+                            'tie_pnl': 0
                         })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
@@ -624,11 +669,12 @@ def show_simulator():
             
             if y1_log:
                 lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
-                lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max")
+                lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Tie_Count,Tie_Bets,Tie_PL")
                 for e in y1_log:
                     lines.append(
                         f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
-                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']}"
+                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']},"
+                        f"{e.get('tie_count', 0)},{e.get('tie_bets', 0)},{e.get('tie_pnl', 0):.0f}"
                     )
             
             # SAFE STRING FORMATTING FOR REPORT
