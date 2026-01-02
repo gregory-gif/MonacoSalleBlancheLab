@@ -444,6 +444,7 @@ class CareerManager:
             shoes_per_session=config.get('tac_shoes', 3),
             bet_strategy=bet_strat_obj,
             penalty_box_enabled=config.get('tac_penalty', True),
+            tie_bet_enabled=config.get('tie_bet_enabled', True),  # Enable by default in career mode
             
             # SPICE v5.0 Configs - Use defaults (all disabled) for career mode
             # Individual spice types can be configured in the UI if needed

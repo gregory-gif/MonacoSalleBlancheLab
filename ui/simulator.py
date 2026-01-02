@@ -48,7 +48,7 @@ class BaccaratWorker:
             
             # Check if we should place a tie bet this hand (1 unit after a tie)
             tie_bet_amt = 0
-            if state.place_tie_bet_this_hand and amt > 0:
+            if state.place_tie_bet_this_hand and amt > 0 and session_overrides.tie_bet_enabled:
                 tie_bet_amt = tier.base_unit  # Always 1 base unit
                 volume += tie_bet_amt
                 state.tie_bets_placed += 1
@@ -431,6 +431,7 @@ def show_simulator():
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
+                tie_bet_enabled=switch_tie_bet.value,
                 # Smart Trailing Stop
                 smart_exit_enabled=switch_smart_exit.value,
                 smart_window_start=int(slider_smart_window.value),
@@ -667,6 +668,18 @@ def show_simulator():
             lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
             lines.append(f"Active Play Time: {active_pct:.1f}%")
             
+            # Tie Betting Statistics
+            if y1_log and switch_tie_bet.value:
+                total_ties = sum(e.get('tie_count', 0) for e in y1_log)
+                total_tie_bets = sum(e.get('tie_bets', 0) for e in y1_log)
+                total_tie_pnl = sum(e.get('tie_pnl', 0) for e in y1_log)
+                if total_ties > 0:
+                    lines.append("\n=== TIE BETTING STATISTICS ===")
+                    lines.append(f"Total Ties: {total_ties}")
+                    lines.append(f"Tie Bets Placed: {total_tie_bets}")
+                    lines.append(f"Tie Bet P&L: €{total_tie_pnl:,.2f}")
+                    lines.append(f"Tie Bet Win Rate: {(total_tie_pnl / (total_tie_bets * 10) if total_tie_bets > 0 else 0):.1%}")
+            
             if y1_log:
                 lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
                 lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Tie_Count,Tie_Bets,Tie_PL")
@@ -746,6 +759,13 @@ def show_simulator():
                     select_bet_strat = ui.select(['BANKER', 'PLAYER'], value='BANKER', label='Bet Selection').classes('w-full')
                     
                     slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes (approx {v*70} hands)')
+                    
+                    with ui.row().classes('items-center mt-2'):
+                        switch_tie_bet = ui.switch('🎲 Tie Follow Betting').props('color=cyan')
+                        switch_tie_bet.value = True
+                        ui.label('(1u bet after each tie)').classes('text-xs text-slate-400')
+                    
+                    ui.separator().classes('bg-slate-700 my-2')
                     
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=1, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
