@@ -190,7 +190,7 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands, exit_reason, final_streak, tie_count, tie_bets, tie_pnl = BaccaratWorker.run_session(
+                    pnl, vol, used_level, hands, exit_reason, final_streak, tie_count, tie_bets, tie_pnl, _, _ = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )

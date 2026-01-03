@@ -110,7 +110,7 @@ def test_career_simulation():
             print(f"  Hands: {hands}")
             print(f"  Exit: {exit_reason}")
         else:
-            pnl, vol, used_lvl, hands, exit_reason, press_streak, tie_count, tie_bets, tie_pnl = BaccaratWorker.run_session(
+            pnl, vol, used_lvl, hands, exit_reason, press_streak, tie_count, tie_bets, tie_pnl, _, _ = BaccaratWorker.run_session(
                 current_ga, overrides, tier_map, use_ratchet, use_penalty, active_level, mode, base_bet
             )
             print(f"✓ Baccarat session completed")
