@@ -1190,7 +1190,7 @@ def show_roulette_sim():
             if not spin_log:
                 return
             
-            with ui.expansion('OUR LOG (Session 1) - Bankroll Evolution', icon='show_chart', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+            with ui.expansion('OUR LOG (Session 1) - Bankroll Evolution', icon='show_chart', value=False).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
                 with ui.column().classes('w-full gap-2 p-2'):
                     # Session Summary
                     with ui.row().classes('w-full gap-4 items-center'):
