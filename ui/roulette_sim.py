@@ -1140,9 +1140,9 @@ def show_roulette_sim():
         try:
             # Get current config
             overrides = StrategyOverrides(
-                bet_strategy=select_bet1.value, bet_strategy_2=select_bet2.value,
-                tax_rate=slider_tax.value, tax_threshold=int(slider_tax_threshold.value),
-                stop_loss_units=int(slider_sl.value), profit_lock_units=int(slider_tp.value),
+                bet_strategy=select_bet_strat.value, bet_strategy_2=select_bet_strat_2.value,
+                tax_rate=slider_tax_rate.value, tax_threshold=int(slider_tax_thresh.value),
+                stop_loss_units=int(slider_stop_loss.value), profit_lock_units=int(slider_profit.value),
                 press_trigger_wins=int(select_press.value), press_depth=int(slider_press_depth.value),
                 iron_gate_limit=int(slider_iron_gate.value), shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value, ratchet_enabled=switch_ratchet.value,
@@ -1161,7 +1161,7 @@ def show_roulette_sim():
             
             start_ga = float(slider_start_ga.value)
             base_bet = float(slider_base_bet.value)
-            strategy_mode = select_mode.value
+            strategy_mode = select_engine_mode.value
             safety_factor = float(slider_safety.value)
             
             # Generate tier map
