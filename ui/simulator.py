@@ -16,8 +16,11 @@ SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
 class BaccaratWorker:
     @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0):
+    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0, track_hands: bool = False):
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Baccarat')
+        
+        hand_log = []
+        session_peak_profit = 0
         
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
@@ -93,6 +96,26 @@ class BaccaratWorker:
             # Track tie bet P&L separately
             state.tie_bets_pnl += tie_bet_pnl
             
+            # Track hand-by-hand bankroll evolution
+            if track_hands:
+                hand_log.append({
+                    'hand': state.hands_played_total + 1,
+                    'shoe': state.current_shoe,
+                    'bankroll': current_ga + state.session_pnl + pnl,
+                    'session_pl': state.session_pnl + pnl,
+                    'bet_size': amt,
+                    'outcome': outcome,
+                    'won': main_bet_won if outcome != 'TIE' else None,
+                    'tie_bet_placed': tie_bet_amt > 0,
+                    'tie_bet_pnl': tie_bet_pnl,
+                    'press_level': state.current_press_streak,
+                    'in_virtual': state.is_in_virtual_mode
+                })
+            
+            # Update peak profit
+            if state.session_pnl + pnl > session_peak_profit:
+                session_peak_profit = state.session_pnl + pnl
+            
             # Update state with outcome
             main_bet_won = (outcome == 'BANKER' and is_banker) or (outcome == 'PLAYER' and not is_banker)
             BaccaratStrategist.update_state_after_hand(state, main_bet_won, pnl, is_tie)
@@ -113,7 +136,7 @@ class BaccaratWorker:
             elif state.session_pnl <= state.locked_profit:
                 exit_reason = 'RATCHET'
 
-        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak, state.tie_count, state.tie_bets_placed, state.tie_bets_pnl
+        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak, state.tie_count, state.tie_bets_placed, state.tie_bets_pnl, hand_log, session_peak_profit
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -247,7 +270,8 @@ def calculate_stats(results, config, start_ga, total_months):
     return stats
 
 def show_simulator():
-    running = False 
+    running = False
+    session_detail_data = {} 
     
     def load_saved_strategies():
         try: return load_profile().get('saved_strategies', {})
@@ -410,6 +434,7 @@ def show_simulator():
 
     # --- QUICK REFRESH ---
     async def refresh_single_universe():
+        nonlocal session_detail_data
         try:
             config = {
                 'years': int(slider_years.value), 'freq': int(slider_frequency.value),
@@ -472,6 +497,20 @@ def show_simulator():
                 False 
             )
             
+            # Capture first session details for hand-by-hand analysis
+            tier_map = generate_tier_map(config['safety'], mode=config['strategy_mode'], game_type='Baccarat', base_bet=config['base_bet'])
+            pnl, vol, lvl, hands, exit_reason, streak, tie_count, tie_bets, tie_pnl, hand_log, peak_profit = await asyncio.to_thread(
+                BaccaratWorker.run_session,
+                config['start_ga'], overrides, tier_map, config['use_ratchet'], 
+                switch_penalty.value, 1, config['strategy_mode'], config['base_bet'], True
+            )
+            session_detail_data['pnl'] = pnl
+            session_detail_data['hands'] = hands
+            session_detail_data['exit_reason'] = exit_reason
+            session_detail_data['peak_profit'] = peak_profit
+            session_detail_data['hand_log'] = hand_log
+            session_detail_data['start_bankroll'] = config['start_ga']
+            
             chart_single_container.clear()
             with chart_single_container:
                 ui.label('QUICK BACCARAT REALITY CHECK').classes('text-xs text-cyan-400 font-bold mb-1')
@@ -480,9 +519,118 @@ def show_simulator():
                 fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red")
                 fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                 ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+            
+            render_session_detail()
 
         except Exception as e:
             ui.notify(str(e), type='negative')
+    
+    def render_session_detail():
+        """Render the session detail UI with bankroll evolution graph"""
+        if not session_detail_data or not session_detail_data.get('hand_log'):
+            return
+        
+        with session_detail_container:
+            session_detail_container.clear()
+            
+            hand_log = session_detail_data['hand_log']
+            start_bankroll = session_detail_data['start_bankroll']
+            
+            with ui.expansion('OUR LOG (Session 1) - Bankroll Evolution', icon='show_chart', value=False).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+                with ui.column().classes('w-full gap-2 p-2'):
+                    # Session Summary
+                    with ui.row().classes('w-full gap-4 items-center'):
+                        ui.label(f"Final P/L: €{session_detail_data['pnl']:+,.0f}").classes('text-lg font-bold ' + ('text-green-400' if session_detail_data['pnl'] > 0 else 'text-red-400'))
+                        ui.label(f"Exit: {session_detail_data['exit_reason']}").classes('text-sm text-slate-400')
+                        ui.label(f"Hands: {session_detail_data['hands']}").classes('text-sm text-slate-400')
+                        ui.label(f"Peak Profit: €{session_detail_data['peak_profit']:+,.0f}").classes('text-sm text-cyan-400')
+                        ui.button('↻ REFRESH SESSION', on_click=lambda: asyncio.create_task(refresh_single_universe())).props('flat color=cyan dense size=sm')
+                    
+                    # Create bankroll evolution graph
+                    fig = go.Figure()
+                    
+                    hands = [entry['hand'] for entry in hand_log]
+                    bankrolls = [entry['bankroll'] for entry in hand_log]
+                    session_pls = [entry['session_pl'] for entry in hand_log]
+                    
+                    # Main bankroll line
+                    fig.add_trace(go.Scatter(
+                        x=hands,
+                        y=bankrolls,
+                        mode='lines',
+                        name='Bankroll',
+                        line=dict(color='#3b82f6', width=2),
+                        hovertemplate='Hand %{x}<br>Bankroll: €%{y:,.0f}<extra></extra>'
+                    ))
+                    
+                    # Add starting bankroll reference line
+                    fig.add_hline(y=start_bankroll, line_dash="dash", line_color="gray", annotation_text="Start", annotation_position="right")
+                    
+                    # Highlight tie wins (when tie bet was placed and won)
+                    tie_win_hands = [entry['hand'] for entry in hand_log if entry['tie_bet_placed'] and entry['tie_bet_pnl'] > 0]
+                    tie_win_bankrolls = [entry['bankroll'] for entry in hand_log if entry['tie_bet_placed'] and entry['tie_bet_pnl'] > 0]
+                    
+                    if tie_win_hands:
+                        fig.add_trace(go.Scatter(
+                            x=tie_win_hands,
+                            y=tie_win_bankrolls,
+                            mode='markers',
+                            name='Tie Bet Win',
+                            marker=dict(
+                                size=10,
+                                color='#10b981',
+                                symbol='star'
+                            ),
+                            hovertemplate='Hand %{x}<br>Tie Win!<extra></extra>'
+                        ))
+                    
+                    # Highlight virtual mode periods
+                    virtual_hands = [entry['hand'] for entry in hand_log if entry['in_virtual']]
+                    virtual_bankrolls = [entry['bankroll'] for entry in hand_log if entry['in_virtual']]
+                    
+                    if virtual_hands:
+                        fig.add_trace(go.Scatter(
+                            x=virtual_hands,
+                            y=virtual_bankrolls,
+                            mode='markers',
+                            name='Virtual Mode',
+                            marker=dict(
+                                size=6,
+                                color='#a855f7',
+                                symbol='circle-open'
+                            ),
+                            hovertemplate='Hand %{x}<br>Virtual (Iron Gate)<extra></extra>'
+                        ))
+                    
+                    fig.update_layout(
+                        title='Session Bankroll Evolution',
+                        xaxis_title='Hand Number',
+                        yaxis_title='Bankroll (€)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(30,41,59,0.5)',
+                        font=dict(color='#94a3b8'),
+                        margin=dict(l=20, r=20, t=40, b=40),
+                        hovermode='x unified',
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        )
+                    )
+                    
+                    ui.plotly(fig).classes('w-full h-80')
+                    
+                    # Optional: Add a compact stats table
+                    with ui.row().classes('w-full gap-4 text-xs text-slate-400 justify-around'):
+                        max_press = max([entry['press_level'] for entry in hand_log], default=0)
+                        ui.label(f"Max Press Streak: {max_press}")
+                        tie_bet_count = sum(1 for entry in hand_log if entry['tie_bet_placed'])
+                        ui.label(f"Tie Bets Placed: {tie_bet_count}")
+                        virtual_count = sum(1 for entry in hand_log if entry['in_virtual'])
+                        ui.label(f"Virtual Mode Hands: {virtual_count}")
 
     async def run_sim():
         nonlocal running
@@ -933,6 +1081,7 @@ def show_simulator():
         
         ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
         chart_single_container = ui.column().classes('w-full mt-2')
+        session_detail_container = ui.column().classes('w-full mt-2')
         
         flight_recorder_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')
