@@ -33,7 +33,7 @@ class StrategyOverrides:
     penalty_box_enabled: bool = True
     
     # --- BACCARAT TIE BETTING ---
-    tie_bet_enabled: bool = True  # Place 1-unit tie bet after each tie
+    tie_bet_enabled: bool = False  # Place 1-unit tie bet after each tie
     
     # --- SMART TRAILING STOP ---
     smart_exit_enabled: bool = True
