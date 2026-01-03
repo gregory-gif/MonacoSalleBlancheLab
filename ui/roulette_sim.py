@@ -32,7 +32,7 @@ BET_MAP = {
 
 class RouletteWorker:
     @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 5.0):
+    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 5.0, track_spins: bool = False):
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Roulette')
         
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
@@ -64,6 +64,9 @@ class RouletteWorker:
         # Initialize dynamic TP (can be boosted by spice wins during session)
         original_tp_units = session_overrides.profit_lock_units
         state.dynamic_tp_eur = original_tp_units * base_bet if original_tp_units > 0 else 0
+        
+        # Spin-by-spin tracking for detailed session analysis
+        spin_log = [] if track_spins else None
         
         active_main_bets = []
         b1 = BET_MAP.get(overrides.bet_strategy, RouletteBet.RED)
@@ -154,6 +157,8 @@ class RouletteWorker:
                 number, won_main, pnl_main = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
             
             # Resolve spice bet (if any)
+            spice_pnl = 0
+            spice_won = False
             if fired_spice_type:
                 spice_pnl, spice_won = spice_engine.resolve_spice(fired_spice_type, number, base_bet)
                 state.session_pnl += spice_pnl
@@ -161,6 +166,19 @@ class RouletteWorker:
                 # MOMENTUM TP BOOST on spice win (updates state.dynamic_tp_eur only!)
                 if spice_won and state.dynamic_tp_eur > 0:
                     state.dynamic_tp_eur = spice_engine.apply_momentum_tp_boost(fired_spice_type, state.dynamic_tp_eur, base_bet)
+            
+            # Track spin-by-spin bankroll evolution
+            if track_spins:
+                spin_log.append({
+                    'spin': state.current_spin,
+                    'bankroll': current_ga + state.session_pnl,
+                    'session_pl': state.session_pnl,
+                    'bet_size': unit_amt,
+                    'spice_fired': fired_spice_type.value if fired_spice_type else None,
+                    'spice_won': spice_won,
+                    'caroline_level': state.caroline_level,
+                    'dalembert_level': state.dalembert_level
+                })
             
             # === SMART TRAILING STOP LOGIC ===
             current_profit = state.session_pnl
@@ -206,8 +224,8 @@ class RouletteWorker:
         max_caroline = state.caroline_level
         max_dalembert = state.dalembert_level
         
-        # Return session results + spice stats + detailed tracking + peak profit
-        return (
+        # Return session results + spice stats + detailed tracking + peak profit + spin log
+        result = (
             state.session_pnl, 
             volume, 
             tier.level, 
@@ -219,6 +237,24 @@ class RouletteWorker:
             state.current_press_streak,
             session_peak_profit
         )
+        
+        # If tracking spins, return as dict with spin_log
+        if track_spins:
+            return {
+                'pnl': result[0],
+                'volume': result[1],
+                'tier': result[2],
+                'spins': result[3],
+                'spice_stats': result[4],
+                'exit_reason': result[5],
+                'max_caroline': result[6],
+                'max_dalembert': result[7],
+                'press_streak': result[8],
+                'peak_profit': result[9],
+                'spin_log': spin_log
+            }
+        else:
+            return result
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -927,6 +963,9 @@ def show_roulette_sim():
             render_analysis_ui(stats, config, start_ga, overrides, all_results) 
             label_stats.set_text("Simulation Complete")
             
+            # Refresh session detail to show a sample evening
+            await refresh_session_detail()
+            
             await refresh_single_universe()
 
         except Exception as e:
@@ -1095,6 +1134,139 @@ def show_roulette_sim():
                 ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
             except Exception as e:
                 ui.label(f"Error generating report: {str(e)}").classes('text-red-500')
+
+    async def refresh_session_detail():
+        """Generate and display a new random session with spin-by-spin detail"""
+        try:
+            # Get current config
+            overrides = StrategyOverrides(
+                bet_strategy=select_bet1.value, bet_strategy_2=select_bet2.value,
+                tax_rate=slider_tax.value, tax_threshold=int(slider_tax_threshold.value),
+                stop_loss_units=int(slider_sl.value), profit_lock_units=int(slider_tp.value),
+                press_trigger_wins=int(select_press.value), press_depth=int(slider_press_depth.value),
+                iron_gate_limit=int(slider_iron_gate.value), shoes_per_session=int(slider_shoes.value),
+                penalty_box_enabled=switch_penalty.value, ratchet_enabled=switch_ratchet.value,
+                ratchet_mode=select_ratchet_mode.value,
+                smart_exit_enabled=switch_smart_exit.value,
+                smart_window_start=int(slider_smart_window.value),
+                min_profit_to_lock=int(slider_min_lock.value),
+                trailing_drop_pct=float(slider_trail_pct.value),
+                # Add all spice configurations (simplified for brevity)
+                spice_global_max_per_session=int(slider_spice_global_max_session.value),
+                spice_global_max_per_spin=int(slider_spice_global_max_spin.value),
+                spice_disable_if_caroline_step4=switch_spice_disable_caroline.value,
+                spice_disable_if_pl_below_zero=switch_spice_disable_neg_pl.value,
+                spice_unit_ratio=0.5 if switch_spice_hybrid_mode.value else 1.0,
+            )
+            
+            start_ga = float(slider_start_ga.value)
+            base_bet = float(slider_base_bet.value)
+            strategy_mode = select_mode.value
+            safety_factor = float(slider_safety.value)
+            
+            # Generate tier map
+            tier_map = generate_tier_map(safety_factor, mode=strategy_mode, game_type='Roulette', base_bet=base_bet)
+            
+            # Run a single session with spin tracking
+            def run_tracked_session():
+                return RouletteWorker.run_session(
+                    start_ga, overrides, tier_map, switch_ratchet.value,
+                    False, 1, strategy_mode, base_bet, track_spins=True
+                )
+            
+            session_data = await asyncio.to_thread(run_tracked_session)
+            render_session_detail(session_data, start_ga, base_bet, overrides)
+            
+        except Exception as e:
+            ui.notify(f"Error: {str(e)}", type='negative')
+            print(traceback.format_exc())
+
+    def render_session_detail(session_data, start_bankroll, base_bet, overrides):
+        """Render the session detail UI with bankroll evolution graph"""
+        with session_detail_container:
+            session_detail_container.clear()
+            
+            spin_log = session_data.get('spin_log', [])
+            if not spin_log:
+                return
+            
+            with ui.expansion('OUR LOG (Session 1) - Bankroll Evolution', icon='show_chart', value=True).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
+                with ui.column().classes('w-full gap-2 p-2'):
+                    # Session Summary
+                    with ui.row().classes('w-full gap-4 items-center'):
+                        ui.label(f"Final P/L: €{session_data['pnl']:+,.0f}").classes('text-lg font-bold ' + ('text-green-400' if session_data['pnl'] > 0 else 'text-red-400'))
+                        ui.label(f"Exit: {session_data['exit_reason']}").classes('text-sm text-slate-400')
+                        ui.label(f"Spins: {session_data['spins']}").classes('text-sm text-slate-400')
+                        ui.label(f"Peak Profit: €{session_data['peak_profit']:+,.0f}").classes('text-sm text-cyan-400')
+                        ui.button('↻ REFRESH SESSION', on_click=refresh_session_detail).props('flat color=cyan dense size=sm')
+                    
+                    # Create bankroll evolution graph
+                    fig = go.Figure()
+                    
+                    spins = [entry['spin'] for entry in spin_log]
+                    bankrolls = [entry['bankroll'] for entry in spin_log]
+                    session_pls = [entry['session_pl'] for entry in spin_log]
+                    
+                    # Main bankroll line
+                    fig.add_trace(go.Scatter(
+                        x=spins,
+                        y=bankrolls,
+                        mode='lines',
+                        name='Bankroll',
+                        line=dict(color='#3b82f6', width=2),
+                        hovertemplate='Spin %{x}<br>Bankroll: €%{y:,.0f}<extra></extra>'
+                    ))
+                    
+                    # Add starting bankroll reference line
+                    fig.add_hline(y=start_bankroll, line_dash="dash", line_color="gray", annotation_text="Start", annotation_position="right")
+                    
+                    # Highlight spice spins
+                    spice_spins = [entry['spin'] for entry in spin_log if entry['spice_fired']]
+                    spice_bankrolls = [entry['bankroll'] for entry in spin_log if entry['spice_fired']]
+                    spice_wins = [entry['spice_won'] for entry in spin_log if entry['spice_fired']]
+                    
+                    if spice_spins:
+                        fig.add_trace(go.Scatter(
+                            x=spice_spins,
+                            y=spice_bankrolls,
+                            mode='markers',
+                            name='Spice Bet',
+                            marker=dict(
+                                size=8,
+                                color=['#10b981' if won else '#ef4444' for won in spice_wins],
+                                symbol='star'
+                            ),
+                            hovertemplate='Spin %{x}<br>Spice Fired<extra></extra>'
+                        ))
+                    
+                    fig.update_layout(
+                        title='Session Bankroll Evolution',
+                        xaxis_title='Spin Number',
+                        yaxis_title='Bankroll (€)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(30,41,59,0.5)',
+                        font=dict(color='#94a3b8'),
+                        margin=dict(l=20, r=20, t=40, b=40),
+                        hovermode='x unified',
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        )
+                    )
+                    
+                    ui.plotly(fig).classes('w-full h-80')
+                    
+                    # Optional: Add a compact stats table
+                    with ui.row().classes('w-full gap-4 text-xs text-slate-400 justify-around'):
+                        ui.label(f"Max Caroline: {session_data['max_caroline']}")
+                        ui.label(f"Max D'Alembert: {session_data['max_dalembert']}")
+                        ui.label(f"Press Streak: {session_data['press_streak']}")
+                        spice_count = session_data['spice_stats']['total_spices_used']
+                        ui.label(f"Spices Used: {spice_count}")
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('ROULETTE LAB (MONACO RULES)').classes('text-2xl font-light text-red-400')
@@ -1496,6 +1668,7 @@ def show_roulette_sim():
         chart_single_container = ui.column().classes('w-full mt-2')
         
         flight_recorder_container = ui.column().classes('w-full mb-4')
+        session_detail_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')
         
         update_ladder_preview()
