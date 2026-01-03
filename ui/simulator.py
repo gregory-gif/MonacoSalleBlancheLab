@@ -274,6 +274,7 @@ def show_simulator():
                 'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
                 'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
                 'tac_base_bet': slider_base_bet.value,
+                'tie_bet_enabled': switch_tie_bet.value,
                 # Smart Trailing Stop
                 'smart_exit_enabled': switch_smart_exit.value,
                 'smart_window_start': slider_smart_window.value,
@@ -345,6 +346,7 @@ def show_simulator():
             slider_earn_rate.value = config.get('gold_earn', 10)
             slider_start_ga.value = config.get('start_ga', 2000)
             slider_base_bet.value = config.get('tac_base_bet', 5.0)
+            switch_tie_bet.value = config.get('tie_bet_enabled', False)
             
             # Smart Trailing Stop LOADS
             switch_smart_exit.value = config.get('smart_exit_enabled', True)
@@ -762,7 +764,7 @@ def show_simulator():
                     
                     with ui.row().classes('items-center mt-2'):
                         switch_tie_bet = ui.switch('🎲 Tie Follow Betting').props('color=cyan')
-                        switch_tie_bet.value = True
+                        switch_tie_bet.value = False
                         ui.label('(1u bet after each tie)').classes('text-xs text-slate-400')
                     
                     ui.separator().classes('bg-slate-700 my-2')
