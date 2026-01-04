@@ -47,6 +47,7 @@ class RouletteSessionState:
     caroline_level: int = 0
     neg_caroline_level: int = 0  # Negative Caroline (1-1-2-3-4 on losses)
     neg_snapback_level: int = 0  # Negatif 1-2-4-7 Snap-Back (on losses)
+    gentle_surgeon_level: int = 0  # The Gentle Surgeon (1-2-4 on losses)
     bet_in_progression: int = -1  # Which bet (0 or 1) is currently in progression (-1 = none)
     
     # Spice Engine v5.0
@@ -104,6 +105,12 @@ class RouletteStrategist:
         elif press_mode == 7:
             seq = [1, 2, 4, 7]
             idx = min(state.neg_snapback_level, 3)
+            bet = base_val * seq[idx]
+
+        # --- THE GENTLE SURGEON (1-2-4 on losses) ---
+        elif press_mode == 8:
+            seq = [1, 2, 4]
+            idx = min(state.gentle_surgeon_level, 2)
             bet = base_val * seq[idx]
 
         # --- CAPPED D'ALEMBERT ---
@@ -323,6 +330,13 @@ class RouletteStrategist:
                 if state.neg_snapback_level > 3: state.neg_snapback_level = 3
             elif won:
                 state.neg_snapback_level = 0
+        
+        elif state.overrides.press_trigger_wins == 8: # The Gentle Surgeon
+            if lost:
+                state.gentle_surgeon_level += 1
+                if state.gentle_surgeon_level > 2: state.gentle_surgeon_level = 2
+            elif won:
+                state.gentle_surgeon_level = 0
         
         elif state.overrides.press_trigger_wins == 4: # D'Alembert
             if won:
