@@ -1497,20 +1497,20 @@ def show_roulette_sim():
                     bet_opts.insert(0, None)
                     select_bet_strat_2 = ui.select(bet_opts, label='Bet Selection (2)').classes('w-full')
                     
-                    slider_shoes = ui.slider(min=1, max=5, value=2).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v*60} Spins (approx {v} hours)')
+                    slider_shoes = ui.slider(min=0.5, max=6, value=2, step=0.25).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{int(v*60)} Spins (approx {v:.2f} hours)')
                     
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=3, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
                     
                     # Smart Trailing Stop Controls
                     ui.separator().classes('bg-slate-700 my-2')
-                    ui.label('🎯 SMART TRAILING STOP (90-120 spins)').classes('text-xs text-yellow-400 font-bold')
+                    ui.label('🎯 SMART TRAILING STOP (45+ spins)').classes('text-xs text-yellow-400 font-bold')
                     switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
                     switch_smart_exit.value = True
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Start Window').classes('text-xs text-slate-400')
                         lbl_smart_window = ui.label()
-                    slider_smart_window = ui.slider(min=60, max=110, value=90, step=5).props('color=yellow')
+                    slider_smart_window = ui.slider(min=45, max=120, value=90, step=5).props('color=yellow')
                     lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Spin {int(v)}')
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
