@@ -26,7 +26,6 @@ def save_current_strategy():
         update_strategy_list()
     except Exception as e: ui.notify(str(e), type='negative')
 
-                hands_played_total >= smart_window_start
     try:
         name = select_saved.value
         if not name: return
