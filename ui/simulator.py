@@ -1,82 +1,80 @@
 from nicegui import ui
 import plotly.graph_objects as go
 import random
-import asyncio
-import traceback
-import numpy as np
-import json
+def save_current_strategy():
+    try:
+        name = input_name.value
+        if not name: return
+        profile = load_profile()
+        if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
+        config = {
+            'sim_num': slider_num_sims.value, 'years': slider_years.value, 'freq': slider_frequency.value,
+            'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
+            'eco_hol': switch_holiday.value, 'eco_hol_ceil': slider_holiday_ceil.value, 'eco_insolvency': slider_insolvency.value,
+            'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
+            'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
+            'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
+            'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
+            'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
+            'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
+            'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
+            'tac_base_bet': slider_base_bet.value
+        }
+        profile['saved_strategies'][name] = config
+        save_profile(profile)
+        ui.notify(f'Saved: {name}', type='positive')
+        update_strategy_list()
+    except Exception as e: ui.notify(str(e), type='negative')
 
-# IMPORT RULES
-from engine.baccarat_rules import BaccaratSessionState, BaccaratStrategist
-from engine.strategy_rules import StrategyOverrides, BetStrategy
-from engine.tier_params import TierConfig, generate_tier_map, get_tier_for_ga
-from utils.persistence import load_profile, save_profile
-
-SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
-
-class BaccaratWorker:
-    @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0):
-        tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Baccarat')
-
-        is_active_penalty = penalty_mode and overrides.penalty_box_enabled
-        if is_active_penalty:
-            flat_bet = base_bet
-            tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
-            session_overrides = StrategyOverrides(
-                iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
-                profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
-                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False
-            )
-        else:
-            session_overrides = overrides
-
-        if use_ratchet and not is_active_penalty:
-            session_overrides.ratchet_enabled = True
-            session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
-
-        # --- SMART TRAILING STOP CONFIG ---
-        smart_exit_enabled = getattr(session_overrides, 'smart_exit_enabled', True)
-        smart_window_start = getattr(session_overrides, 'smart_window_start', 30)  # hands
-        min_profit_to_lock = getattr(session_overrides, 'min_profit_to_lock', 5)   # units
-        trailing_drop_pct = getattr(session_overrides, 'trailing_drop_pct', 0.25)  # 25%
-
-        state = BaccaratSessionState(tier=tier, overrides=session_overrides)
-        state.current_shoe = 1
-        volume = 0
-        session_peak_profit = 0.0
-        hands_played_total = 0
-        exit_reason = None
-
-        while state.current_shoe <= overrides.shoes_per_session and state.mode.name != 'STOPPED':
-            decision = BaccaratStrategist.get_next_decision(state)
-            if decision['mode'].name == 'STOPPED': break
-
-            amt = decision['bet_amount']
-            volume += amt
-            hands_played_total += 1
-
-            # Simulation Physics
-            is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            won = (random.random() < 0.5)
-
-            pnl = 0
-            if won:
-                pnl = amt * 0.95 if is_banker else amt
-            else:
-                pnl = -amt
-
-            BaccaratStrategist.update_state_after_hand(state, won, pnl)
-
-            # --- SMART TRAILING STOP LOGIC ---
-            current_profit = state.session_pnl
-            if current_profit > session_peak_profit:
-                session_peak_profit = current_profit
-
-            if (
-                smart_exit_enabled and
                 hands_played_total >= smart_window_start
+    try:
+        name = select_saved.value
+        if not name: return
+        saved = load_saved_strategies()
+        config = saved.get(name)
+        if not config: return
+        slider_num_sims.value = config.get('sim_num', 20)
+        slider_years.value = config.get('years', 10)
+        slider_frequency.value = config.get('freq', 10)
+        slider_contrib_win.value = config.get('eco_win', 300)
+        slider_contrib_loss.value = config.get('eco_loss', 300)
+        switch_luxury_tax.value = config.get('eco_tax', False)
+        slider_tax_thresh.value = config.get('eco_tax_thresh', 12500)
+        slider_tax_rate.value = config.get('eco_tax_rate', 25)
+        switch_holiday.value = config.get('eco_hol', False)
+        slider_holiday_ceil.value = config.get('eco_hol_ceil', 10000)
+        slider_insolvency.value = config.get('eco_insolvency', 1000) 
+        slider_safety.value = config.get('tac_safety', 25)
+        slider_iron_gate.value = config.get('tac_iron', 3)
+        select_press.value = config.get('tac_press', 1)
+        slider_press_depth.value = config.get('tac_depth', 3)
+        slider_shoes.value = config.get('tac_shoes', 3)
+        
+        raw_bet = config.get('tac_bet', 'BANKER')
+        if not raw_bet: raw_bet = 'BANKER'
+        select_bet_strat.value = raw_bet
+        
+        switch_penalty.value = config.get('tac_penalty', True)
+        select_engine_mode.value = config.get('tac_mode', 'Standard') 
+        slider_stop_loss.value = config.get('risk_stop', 10)
+        slider_profit.value = config.get('risk_prof', 10)
+        switch_ratchet.value = config.get('risk_ratch', False)
+        select_ratchet_mode.value = config.get('risk_ratch_mode', 'Standard')
+        select_status.value = config.get('gold_stat', 'Gold')
+        slider_earn_rate.value = config.get('gold_earn', 10)
+        slider_start_ga.value = config.get('start_ga', 2000)
+        slider_base_bet.value = config.get('tac_base_bet', 5.0)
+        ui.notify(f'Loaded: {name}', type='info')
+    except: pass
+
             ):
+    try:
+        name = select_saved.value
+        if not name: return
+        profile = load_profile()
+        if 'saved_strategies' in profile and name in profile['saved_strategies']:
+            del profile['saved_strategies'][name]
+            save_profile(profile)
                 min_lock_threshold = min_profit_to_lock * base_bet
                 if current_profit >= min_lock_threshold:
                     dynamic_floor = session_peak_profit * (1.0 - trailing_drop_pct)
