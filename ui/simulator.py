@@ -569,17 +569,18 @@ def show_simulator():
 
 
             
-            # STRATEGY LIBRARY RESTORED HERE
-            with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
-                with ui.column().classes('w-full gap-4'):
-                    with ui.row().classes('w-full items-center gap-4'):
-                        input_name = ui.input('Save Name').props('dark').classes('flex-grow')
-                        ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
-                    with ui.row().classes('w-full items-center gap-4'):
-                        select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
-                        ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
-                        ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
-                    update_strategy_list()
+
+# STRATEGY LIBRARY RESTORED HERE
+with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
+    with ui.column().classes('w-full gap-4'):
+        with ui.row().classes('w-full items-center gap-4'):
+            input_name = ui.input('Save Name').props('dark').classes('flex-grow')
+            ui.button('SAVE', on_click=save_current_strategy).props('icon=save color=green')
+        with ui.row().classes('w-full items-center gap-4'):
+            select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
+            ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
+            ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
+        update_strategy_list()
 
             ui.separator().classes('bg-slate-700')
 
