@@ -2,7 +2,7 @@ from nicegui import ui
 import plotly.graph_objects as go
 import random
 def save_current_strategy():
-    try:
+
         name = input_name.value
         if not name: return
         profile = load_profile()
