@@ -67,39 +67,7 @@ def save_current_strategy():
     except: pass
 
     try:
-        name = select_saved.value
-        if not name: return
-        profile = load_profile()
-        if 'saved_strategies' in profile and name in profile['saved_strategies']:
-            del profile['saved_strategies'][name]
-            save_profile(profile)
-                min_lock_threshold = min_profit_to_lock * base_bet
-                if current_profit >= min_lock_threshold:
-                    dynamic_floor = session_peak_profit * (1.0 - trailing_drop_pct)
-                    if current_profit <= dynamic_floor:
-                        from engine.strategy_rules import PlayMode
-                        state.mode = PlayMode.STOPPED
-                        exit_reason = 'SMART_TRAILING'
-                        break
 
-            if state.hands_played_in_shoe >= 70:
-                state.current_shoe += 1
-                state.hands_played_in_shoe = 0
-
-        # Determine exit reason
-        if exit_reason is None:
-            exit_reason = 'TIME_LIMIT'
-            if state.mode.name == 'STOPPED':
-                stop_val = -(overrides.stop_loss_units * tier.base_unit)
-                target_val = overrides.profit_lock_units * tier.base_unit
-                if state.session_pnl <= stop_val:
-                    exit_reason = 'STOP_LOSS'
-                elif state.session_pnl >= target_val:
-                    exit_reason = 'TARGET'
-                elif state.session_pnl <= state.locked_profit:
-                    exit_reason = 'RATCHET'
-
-        return state.session_pnl, volume, tier.level, hands_played_total, exit_reason, state.current_press_streak, session_peak_profit
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
