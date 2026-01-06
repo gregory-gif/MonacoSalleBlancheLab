@@ -66,7 +66,6 @@ def save_current_strategy():
         ui.notify(f'Loaded: {name}', type='info')
     except: pass
 
-            ):
     try:
         name = select_saved.value
         if not name: return
