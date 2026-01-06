@@ -16,20 +16,17 @@ SBM_TIERS = {'Silver': 5000, 'Gold': 22500, 'Platinum': 175000}
 
 class BaccaratWorker:
     @staticmethod
-    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0, track_hands: bool = False):
+    def run_session(current_ga: float, overrides: StrategyOverrides, tier_map: dict, use_ratchet: bool, penalty_mode: bool, active_level: int, mode: str, base_bet: float = 10.0):
         tier = get_tier_for_ga(current_ga, tier_map, active_level, mode, game_type='Baccarat')
-        
-        hand_log = []
-        session_peak_profit = 0
-        
+
         is_active_penalty = penalty_mode and overrides.penalty_box_enabled
         if is_active_penalty:
-            flat_bet = base_bet 
+            flat_bet = base_bet
             tier = TierConfig(level=tier.level, min_ga=0, max_ga=9999999, base_unit=flat_bet, press_unit=flat_bet, stop_loss=tier.stop_loss, profit_lock=tier.profit_lock, catastrophic_cap=tier.catastrophic_cap)
             session_overrides = StrategyOverrides(
                 iron_gate_limit=overrides.iron_gate_limit, stop_loss_units=overrides.stop_loss_units,
                 profit_lock_units=overrides.profit_lock_units, shoes_per_session=overrides.shoes_per_session,
-                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False 
+                bet_strategy=overrides.bet_strategy, press_trigger_wins=999, press_depth=0, ratchet_enabled=False
             )
         else:
             session_overrides = overrides
@@ -38,105 +35,75 @@ class BaccaratWorker:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
+        # --- SMART TRAILING STOP CONFIG ---
+        smart_exit_enabled = getattr(session_overrides, 'smart_exit_enabled', True)
+        smart_window_start = getattr(session_overrides, 'smart_window_start', 30)  # hands
+        min_profit_to_lock = getattr(session_overrides, 'min_profit_to_lock', 5)   # units
+        trailing_drop_pct = getattr(session_overrides, 'trailing_drop_pct', 0.25)  # 25%
+
         state = BaccaratSessionState(tier=tier, overrides=session_overrides)
         state.current_shoe = 1
         volume = 0
-        
+        session_peak_profit = 0.0
+        hands_played_total = 0
+        exit_reason = None
+
         while state.current_shoe <= overrides.shoes_per_session and state.mode.name != 'STOPPED':
             decision = BaccaratStrategist.get_next_decision(state)
             if decision['mode'].name == 'STOPPED': break
-            
+
             amt = decision['bet_amount']
             volume += amt
-            
-            # Check if we should place a tie bet this hand (1 unit after a tie)
-            tie_bet_amt = 0
-            if state.place_tie_bet_this_hand and amt > 0 and session_overrides.tie_bet_enabled:
-                tie_bet_amt = tier.base_unit  # Always 1 base unit
-                volume += tie_bet_amt
-                state.tie_bets_placed += 1
-            
-            # Simulation Physics - Realistic Baccarat Probabilities
+            hands_played_total += 1
+
+            # Simulation Physics
             is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
-            rng = random.random()
-            
-            # Probabilities: Banker 45.86%, Player 44.62%, Tie 9.52%
-            if rng < 0.4586:  # Banker wins
-                outcome = 'BANKER'
-            elif rng < 0.9048:  # Player wins (0.4586 + 0.4462)
-                outcome = 'PLAYER'
-            else:  # Tie
-                outcome = 'TIE'
-            
+            won = (random.random() < 0.5)
+
             pnl = 0
-            is_tie = False
-            tie_bet_pnl = 0
-            
-            if outcome == 'TIE':
-                # Tie: Main bet pushes (no win/loss), tie bet wins 8:1
-                is_tie = True
-                state.tie_count += 1
-                if tie_bet_amt > 0:
-                    tie_bet_pnl = tie_bet_amt * 8  # Win 8:1 on tie bet
-                    pnl = tie_bet_pnl
+            if won:
+                pnl = amt * 0.95 if is_banker else amt
             else:
-                # Main bet resolution
-                main_bet_won = (outcome == 'BANKER' and is_banker) or (outcome == 'PLAYER' and not is_banker)
-                
-                if main_bet_won:
-                    pnl = amt * 0.95 if is_banker else amt
-                else:
-                    pnl = -amt
-                
-                # Tie bet loses if placed
-                if tie_bet_amt > 0:
-                    tie_bet_pnl = -tie_bet_amt
-                    pnl += tie_bet_pnl
-            
-            # Track tie bet P&L separately
-            state.tie_bets_pnl += tie_bet_pnl
-            
-            # Track hand-by-hand bankroll evolution
-            if track_hands:
-                hand_log.append({
-                    'hand': state.hands_played_total + 1,
-                    'shoe': state.current_shoe,
-                    'bankroll': current_ga + state.session_pnl + pnl,
-                    'session_pl': state.session_pnl + pnl,
-                    'bet_size': amt,
-                    'outcome': outcome,
-                    'won': main_bet_won if outcome != 'TIE' else None,
-                    'tie_bet_placed': tie_bet_amt > 0,
-                    'tie_bet_pnl': tie_bet_pnl,
-                    'press_level': state.current_press_streak,
-                    'in_virtual': state.is_in_virtual_mode
-                })
-            
-            # Update peak profit
-            if state.session_pnl + pnl > session_peak_profit:
-                session_peak_profit = state.session_pnl + pnl
-            
-            # Update state with outcome
-            main_bet_won = (outcome == 'BANKER' and is_banker) or (outcome == 'PLAYER' and not is_banker)
-            BaccaratStrategist.update_state_after_hand(state, main_bet_won, pnl, is_tie)
-            
+                pnl = -amt
+
+            BaccaratStrategist.update_state_after_hand(state, won, pnl)
+
+            # --- SMART TRAILING STOP LOGIC ---
+            current_profit = state.session_pnl
+            if current_profit > session_peak_profit:
+                session_peak_profit = current_profit
+
+            if (
+                smart_exit_enabled and
+                hands_played_total >= smart_window_start
+            ):
+                min_lock_threshold = min_profit_to_lock * base_bet
+                if current_profit >= min_lock_threshold:
+                    dynamic_floor = session_peak_profit * (1.0 - trailing_drop_pct)
+                    if current_profit <= dynamic_floor:
+                        from engine.strategy_rules import PlayMode
+                        state.mode = PlayMode.STOPPED
+                        exit_reason = 'SMART_TRAILING'
+                        break
+
             if state.hands_played_in_shoe >= 70:
                 state.current_shoe += 1
                 state.hands_played_in_shoe = 0
 
         # Determine exit reason
-        exit_reason = 'TIME_LIMIT'
-        if state.mode.name == 'STOPPED':
-            stop_val = -(overrides.stop_loss_units * tier.base_unit)
-            target_val = overrides.profit_lock_units * tier.base_unit
-            if state.session_pnl <= stop_val:
-                exit_reason = 'STOP_LOSS'
-            elif state.session_pnl >= target_val:
-                exit_reason = 'TARGET'
-            elif state.session_pnl <= state.locked_profit:
-                exit_reason = 'RATCHET'
+        if exit_reason is None:
+            exit_reason = 'TIME_LIMIT'
+            if state.mode.name == 'STOPPED':
+                stop_val = -(overrides.stop_loss_units * tier.base_unit)
+                target_val = overrides.profit_lock_units * tier.base_unit
+                if state.session_pnl <= stop_val:
+                    exit_reason = 'STOP_LOSS'
+                elif state.session_pnl >= target_val:
+                    exit_reason = 'TARGET'
+                elif state.session_pnl <= state.locked_profit:
+                    exit_reason = 'RATCHET'
 
-        return state.session_pnl, volume, tier.level, state.hands_played_total, exit_reason, state.current_press_streak, state.tie_count, state.tie_bets_placed, state.tie_bets_pnl, hand_log, session_peak_profit
+        return state.session_pnl, volume, tier.level, hands_played_total, exit_reason, state.current_press_streak, session_peak_profit
 
     @staticmethod
     def run_full_career(start_ga, total_months, sessions_per_year, 
@@ -190,7 +157,7 @@ class BaccaratWorker:
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
                 for _ in range(sessions_this_month):
-                    pnl, vol, used_level, hands, exit_reason, final_streak, tie_count, tie_bets, tie_pnl, _, _ = BaccaratWorker.run_session(
+                    pnl, vol, used_level, hands, exit_reason, final_streak, peak_profit = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
                     )
@@ -213,27 +180,35 @@ class BaccaratWorker:
                             'tier': used_level,
                             'exit': exit_reason,
                             'streak_max': final_streak,
-                            'tie_count': tie_count,
-                            'tie_bets': tie_bets,
-                            'tie_pnl': tie_pnl
+                            # Extra fields for parity with Roulette sim
+                            'spice_cnt': 0,  # Not used in Baccarat
+                            'spice_pl': 0,   # Not used in Baccarat
+                            'tp_boosts': 0,  # Not used in Baccarat
+                            'caroline_max': 0,  # Not used in Baccarat
+                            'dalembert_max': 0, # Not used in Baccarat
+                            'peak_profit': peak_profit
                         })
             else:
-                 if track_y1_details and m < 12:
-                        y1_log.append({
-                            'month': m + 1,
-                            'session': 0,
-                            'result': 0,
-                            'balance': current_ga,
-                            'game_bal': start_ga + running_play_pnl,
-                            'hands': 0,
-                            'volume': 0,
-                            'tier': 0,
-                            'exit': 'INSOLVENT',
-                            'streak_max': 0,
-                            'tie_count': 0,
-                            'tie_bets': 0,
-                            'tie_pnl': 0
-                        })
+                if track_y1_details and m < 12:
+                    y1_log.append({
+                        'month': m + 1,
+                        'session': 0,
+                        'result': 0,
+                        'balance': current_ga,
+                        'game_bal': start_ga + running_play_pnl,
+                        'hands': 0,
+                        'volume': 0,
+                        'tier': 0,
+                        'exit': 'INSOLVENT',
+                        'streak_max': 0,
+                        # Extra fields for parity with Roulette sim
+                        'spice_cnt': 0,
+                        'spice_pl': 0,
+                        'tp_boosts': 0,
+                        'caroline_max': 0,
+                        'dalembert_max': 0,
+                        'peak_profit': 0
+                    })
 
             if gold_hit_year == -1 and current_year_points >= target_points:
                 gold_hit_year = (m // 12) + 1
@@ -270,8 +245,7 @@ def calculate_stats(results, config, start_ga, total_months):
     return stats
 
 def show_simulator():
-    running = False
-    session_detail_data = {} 
+    running = False 
     
     def load_saved_strategies():
         try: return load_profile().get('saved_strategies', {})
@@ -297,34 +271,7 @@ def show_simulator():
                 'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
                 'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
                 'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
-                'tac_base_bet': slider_base_bet.value,
-                'tie_bet_enabled': switch_tie_bet.value,
-                # Smart Trailing Stop
-                'smart_exit_enabled': switch_smart_exit.value,
-                'smart_window_start': slider_smart_window.value,
-                'min_profit_to_lock': slider_min_lock.value,
-                'trailing_drop_pct': slider_trail_pct.value,
-                # Doctrine Engine
-                'doctrine_enabled': switch_doctrine_enabled.value,
-                'doctrine_pl_stop': slider_doctrine_pl_stop.value,
-                'doctrine_pl_target': slider_doctrine_pl_target.value,
-                'doctrine_pl_press_wins': slider_doctrine_pl_press_wins.value,
-                'doctrine_pl_press_depth': slider_doctrine_pl_press_depth.value,
-                'doctrine_pl_iron': slider_doctrine_pl_iron.value,
-                'doctrine_ti_stop': slider_doctrine_ti_stop.value,
-                'doctrine_ti_target': slider_doctrine_ti_target.value,
-                'doctrine_ti_press_wins': slider_doctrine_ti_press_wins.value,
-                'doctrine_ti_press_depth': slider_doctrine_ti_press_depth.value,
-                'doctrine_ti_iron': slider_doctrine_ti_iron.value,
-                'doctrine_loss_trigger': slider_doctrine_loss_trigger.value,
-                'doctrine_dd_pct': slider_doctrine_dd_pct.value,
-                'doctrine_dd_eur': slider_doctrine_dd_eur.value,
-                'doctrine_tight_min': slider_doctrine_tight_min.value,
-                'doctrine_tight_max': slider_doctrine_tight_max.value,
-                'doctrine_cooloff_enabled': switch_doctrine_cooloff.value,
-                'doctrine_cooloff_floor': slider_doctrine_cooloff_floor.value,
-                'doctrine_cooloff_months': slider_doctrine_cooloff_months.value,
-                'doctrine_recovery_pct': slider_doctrine_recovery_pct.value
+                'tac_base_bet': slider_base_bet.value
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -370,36 +317,6 @@ def show_simulator():
             slider_earn_rate.value = config.get('gold_earn', 10)
             slider_start_ga.value = config.get('start_ga', 2000)
             slider_base_bet.value = config.get('tac_base_bet', 5.0)
-            switch_tie_bet.value = config.get('tie_bet_enabled', False)
-            
-            # Smart Trailing Stop LOADS
-            switch_smart_exit.value = config.get('smart_exit_enabled', True)
-            slider_smart_window.value = config.get('smart_window_start', 190)
-            slider_min_lock.value = config.get('min_profit_to_lock', 20)
-            slider_trail_pct.value = config.get('trailing_drop_pct', 0.20)
-            
-            # Doctrine Engine LOADS
-            switch_doctrine_enabled.value = config.get('doctrine_enabled', False)
-            slider_doctrine_pl_stop.value = config.get('doctrine_pl_stop', 10)
-            slider_doctrine_pl_target.value = config.get('doctrine_pl_target', 10)
-            slider_doctrine_pl_press_wins.value = config.get('doctrine_pl_press_wins', 3)
-            slider_doctrine_pl_press_depth.value = config.get('doctrine_pl_press_depth', 3)
-            slider_doctrine_pl_iron.value = config.get('doctrine_pl_iron', 3)
-            slider_doctrine_ti_stop.value = config.get('doctrine_ti_stop', 5)
-            slider_doctrine_ti_target.value = config.get('doctrine_ti_target', 5)
-            slider_doctrine_ti_press_wins.value = config.get('doctrine_ti_press_wins', 5)
-            slider_doctrine_ti_press_depth.value = config.get('doctrine_ti_press_depth', 1)
-            slider_doctrine_ti_iron.value = config.get('doctrine_ti_iron', 2)
-            slider_doctrine_loss_trigger.value = config.get('doctrine_loss_trigger', 8)
-            slider_doctrine_dd_pct.value = config.get('doctrine_dd_pct', 0.15)
-            slider_doctrine_dd_eur.value = config.get('doctrine_dd_eur', 3000)
-            slider_doctrine_tight_min.value = config.get('doctrine_tight_min', 1)
-            slider_doctrine_tight_max.value = config.get('doctrine_tight_max', 2)
-            switch_doctrine_cooloff.value = config.get('doctrine_cooloff_enabled', True)
-            slider_doctrine_cooloff_floor.value = config.get('doctrine_cooloff_floor', 3000)
-            slider_doctrine_cooloff_months.value = config.get('doctrine_cooloff_months', 1)
-            slider_doctrine_recovery_pct.value = config.get('doctrine_recovery_pct', 0.07)
-            
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
 
@@ -434,7 +351,6 @@ def show_simulator():
 
     # --- QUICK REFRESH ---
     async def refresh_single_universe():
-        nonlocal session_detail_data
         try:
             config = {
                 'years': int(slider_years.value), 'freq': int(slider_frequency.value),
@@ -457,34 +373,7 @@ def show_simulator():
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
-                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                tie_bet_enabled=switch_tie_bet.value,
-                # Smart Trailing Stop
-                smart_exit_enabled=switch_smart_exit.value,
-                smart_window_start=int(slider_smart_window.value),
-                min_profit_to_lock=int(slider_min_lock.value),
-                trailing_drop_pct=float(slider_trail_pct.value),
-                # Doctrine Engine
-                doctrine_enabled=switch_doctrine_enabled.value,
-                doctrine_pl_stop=float(slider_doctrine_pl_stop.value),
-                doctrine_pl_target=float(slider_doctrine_pl_target.value),
-                doctrine_pl_press_wins=int(slider_doctrine_pl_press_wins.value),
-                doctrine_pl_press_depth=int(slider_doctrine_pl_press_depth.value),
-                doctrine_pl_iron=int(slider_doctrine_pl_iron.value),
-                doctrine_ti_stop=float(slider_doctrine_ti_stop.value),
-                doctrine_ti_target=float(slider_doctrine_ti_target.value),
-                doctrine_ti_press_wins=int(slider_doctrine_ti_press_wins.value),
-                doctrine_ti_press_depth=int(slider_doctrine_ti_press_depth.value),
-                doctrine_ti_iron=int(slider_doctrine_ti_iron.value),
-                doctrine_loss_trigger=float(slider_doctrine_loss_trigger.value),
-                doctrine_dd_pct_trigger=float(slider_doctrine_dd_pct.value),
-                doctrine_dd_eur_trigger=float(slider_doctrine_dd_eur.value),
-                doctrine_tight_min=int(slider_doctrine_tight_min.value),
-                doctrine_tight_max=int(slider_doctrine_tight_max.value),
-                doctrine_cooloff_enabled=switch_doctrine_cooloff.value,
-                doctrine_cooloff_floor=float(slider_doctrine_cooloff_floor.value),
-                doctrine_cooloff_min_months=int(slider_doctrine_cooloff_months.value),
-                doctrine_cooloff_recovery_pct=float(slider_doctrine_recovery_pct.value)
+                ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value
             )
             
             res = await asyncio.to_thread(BaccaratWorker.run_full_career, 
@@ -497,20 +386,6 @@ def show_simulator():
                 False 
             )
             
-            # Capture first session details for hand-by-hand analysis
-            tier_map = generate_tier_map(config['safety'], mode=config['strategy_mode'], game_type='Baccarat', base_bet=config['base_bet'])
-            pnl, vol, lvl, hands, exit_reason, streak, tie_count, tie_bets, tie_pnl, hand_log, peak_profit = await asyncio.to_thread(
-                BaccaratWorker.run_session,
-                config['start_ga'], overrides, tier_map, config['use_ratchet'], 
-                switch_penalty.value, 1, config['strategy_mode'], config['base_bet'], True
-            )
-            session_detail_data['pnl'] = pnl
-            session_detail_data['hands'] = hands
-            session_detail_data['exit_reason'] = exit_reason
-            session_detail_data['peak_profit'] = peak_profit
-            session_detail_data['hand_log'] = hand_log
-            session_detail_data['start_bankroll'] = config['start_ga']
-            
             chart_single_container.clear()
             with chart_single_container:
                 ui.label('QUICK BACCARAT REALITY CHECK').classes('text-xs text-cyan-400 font-bold mb-1')
@@ -519,118 +394,9 @@ def show_simulator():
                 fig.add_hline(y=config['insolvency'], line_dash="dash", line_color="red")
                 fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                 ui.plotly(fig).classes('w-full border border-slate-700 rounded')
-            
-            render_session_detail()
 
         except Exception as e:
             ui.notify(str(e), type='negative')
-    
-    def render_session_detail():
-        """Render the session detail UI with bankroll evolution graph"""
-        if not session_detail_data or not session_detail_data.get('hand_log'):
-            return
-        
-        with session_detail_container:
-            session_detail_container.clear()
-            
-            hand_log = session_detail_data['hand_log']
-            start_bankroll = session_detail_data['start_bankroll']
-            
-            with ui.expansion('OUR LOG (Session 1) - Bankroll Evolution', icon='show_chart', value=False).classes('w-full bg-slate-800 text-slate-300 border-2 border-slate-600'):
-                with ui.column().classes('w-full gap-2 p-2'):
-                    # Session Summary
-                    with ui.row().classes('w-full gap-4 items-center'):
-                        ui.label(f"Final P/L: €{session_detail_data['pnl']:+,.0f}").classes('text-lg font-bold ' + ('text-green-400' if session_detail_data['pnl'] > 0 else 'text-red-400'))
-                        ui.label(f"Exit: {session_detail_data['exit_reason']}").classes('text-sm text-slate-400')
-                        ui.label(f"Hands: {session_detail_data['hands']}").classes('text-sm text-slate-400')
-                        ui.label(f"Peak Profit: €{session_detail_data['peak_profit']:+,.0f}").classes('text-sm text-cyan-400')
-                        ui.button('↻ REFRESH SESSION', on_click=lambda: asyncio.create_task(refresh_single_universe())).props('flat color=cyan dense size=sm')
-                    
-                    # Create bankroll evolution graph
-                    fig = go.Figure()
-                    
-                    hands = [entry['hand'] for entry in hand_log]
-                    bankrolls = [entry['bankroll'] for entry in hand_log]
-                    session_pls = [entry['session_pl'] for entry in hand_log]
-                    
-                    # Main bankroll line
-                    fig.add_trace(go.Scatter(
-                        x=hands,
-                        y=bankrolls,
-                        mode='lines',
-                        name='Bankroll',
-                        line=dict(color='#3b82f6', width=2),
-                        hovertemplate='Hand %{x}<br>Bankroll: €%{y:,.0f}<extra></extra>'
-                    ))
-                    
-                    # Add starting bankroll reference line
-                    fig.add_hline(y=start_bankroll, line_dash="dash", line_color="gray", annotation_text="Start", annotation_position="right")
-                    
-                    # Highlight tie wins (when tie bet was placed and won)
-                    tie_win_hands = [entry['hand'] for entry in hand_log if entry['tie_bet_placed'] and entry['tie_bet_pnl'] > 0]
-                    tie_win_bankrolls = [entry['bankroll'] for entry in hand_log if entry['tie_bet_placed'] and entry['tie_bet_pnl'] > 0]
-                    
-                    if tie_win_hands:
-                        fig.add_trace(go.Scatter(
-                            x=tie_win_hands,
-                            y=tie_win_bankrolls,
-                            mode='markers',
-                            name='Tie Bet Win',
-                            marker=dict(
-                                size=10,
-                                color='#10b981',
-                                symbol='star'
-                            ),
-                            hovertemplate='Hand %{x}<br>Tie Win!<extra></extra>'
-                        ))
-                    
-                    # Highlight virtual mode periods
-                    virtual_hands = [entry['hand'] for entry in hand_log if entry['in_virtual']]
-                    virtual_bankrolls = [entry['bankroll'] for entry in hand_log if entry['in_virtual']]
-                    
-                    if virtual_hands:
-                        fig.add_trace(go.Scatter(
-                            x=virtual_hands,
-                            y=virtual_bankrolls,
-                            mode='markers',
-                            name='Virtual Mode',
-                            marker=dict(
-                                size=6,
-                                color='#a855f7',
-                                symbol='circle-open'
-                            ),
-                            hovertemplate='Hand %{x}<br>Virtual (Iron Gate)<extra></extra>'
-                        ))
-                    
-                    fig.update_layout(
-                        title='Session Bankroll Evolution',
-                        xaxis_title='Hand Number',
-                        yaxis_title='Bankroll (€)',
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        plot_bgcolor='rgba(30,41,59,0.5)',
-                        font=dict(color='#94a3b8'),
-                        margin=dict(l=20, r=20, t=40, b=40),
-                        hovermode='x unified',
-                        showlegend=True,
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
-                    )
-                    
-                    ui.plotly(fig).classes('w-full h-80')
-                    
-                    # Optional: Add a compact stats table
-                    with ui.row().classes('w-full gap-4 text-xs text-slate-400 justify-around'):
-                        max_press = max([entry['press_level'] for entry in hand_log], default=0)
-                        ui.label(f"Max Press Streak: {max_press}")
-                        tie_bet_count = sum(1 for entry in hand_log if entry['tie_bet_placed'])
-                        ui.label(f"Tie Bets Placed: {tie_bet_count}")
-                        virtual_count = sum(1 for entry in hand_log if entry['in_virtual'])
-                        ui.label(f"Virtual Mode Hands: {virtual_count}")
 
     async def run_sim():
         nonlocal running
@@ -662,32 +428,8 @@ def show_simulator():
                 tax_rate=config['tax_rate'], bet_strategy=getattr(BetStrategy, raw_bet),
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
-                # Smart Trailing Stop
-                smart_exit_enabled=switch_smart_exit.value,
-                smart_window_start=int(slider_smart_window.value),
-                min_profit_to_lock=int(slider_min_lock.value),
-                trailing_drop_pct=float(slider_trail_pct.value),
-                # Doctrine Engine
-                doctrine_enabled=switch_doctrine_enabled.value,
-                doctrine_pl_stop=float(slider_doctrine_pl_stop.value),
-                doctrine_pl_target=float(slider_doctrine_pl_target.value),
-                doctrine_pl_press_wins=int(slider_doctrine_pl_press_wins.value),
-                doctrine_pl_press_depth=int(slider_doctrine_pl_press_depth.value),
-                doctrine_pl_iron=int(slider_doctrine_pl_iron.value),
-                doctrine_ti_stop=float(slider_doctrine_ti_stop.value),
-                doctrine_ti_target=float(slider_doctrine_ti_target.value),
-                doctrine_ti_press_wins=int(slider_doctrine_ti_press_wins.value),
-                doctrine_ti_press_depth=int(slider_doctrine_ti_press_depth.value),
-                doctrine_ti_iron=int(slider_doctrine_ti_iron.value),
-                doctrine_loss_trigger=float(slider_doctrine_loss_trigger.value),
-                doctrine_dd_pct_trigger=float(slider_doctrine_dd_pct.value),
-                doctrine_dd_eur_trigger=float(slider_doctrine_dd_eur.value),
-                doctrine_tight_min=int(slider_doctrine_tight_min.value),
-                doctrine_tight_max=int(slider_doctrine_tight_max.value),
-                doctrine_cooloff_enabled=switch_doctrine_cooloff.value,
-                doctrine_cooloff_floor=float(slider_doctrine_cooloff_floor.value),
-                doctrine_cooloff_min_months=int(slider_doctrine_cooloff_months.value),
-                doctrine_cooloff_recovery_pct=float(slider_doctrine_recovery_pct.value)
+                # Smart Trailing Stop config (defaults)
+                smart_exit_enabled=True, smart_window_start=30, min_profit_to_lock=5, trailing_drop_pct=0.25
             )
 
             start_ga = config['start_ga']
@@ -792,63 +534,40 @@ def show_simulator():
                         table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
                     ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
-        with report_container:
-            report_container.clear()
-            lines = ["=== BACCARAT CONFIGURATION ==="]
-            lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
-            lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
-            lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
-            lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
-            
-            # Doctrine Engine Configuration
-            if overrides.doctrine_enabled:
-                lines.append("\n=== DOCTRINE ENGINE v1.0 (ENABLED) ===")
-                lines.append(f"PLATINUM: Stop={overrides.doctrine_pl_stop}u | Target={overrides.doctrine_pl_target}u | Press={overrides.doctrine_pl_press_wins}/{overrides.doctrine_pl_press_depth} | Iron={overrides.doctrine_pl_iron}")
-                lines.append(f"TIGHT: Stop={overrides.doctrine_ti_stop}u | Target={overrides.doctrine_ti_target}u | Press={overrides.doctrine_ti_press_wins}/{overrides.doctrine_ti_press_depth} | Iron={overrides.doctrine_ti_iron}")
-                lines.append(f"Triggers: Loss>{overrides.doctrine_loss_trigger}u | DD%>{overrides.doctrine_dd_pct_trigger*100:.0f}% | DD€>{overrides.doctrine_dd_eur_trigger:.0f}")
-                lines.append(f"TIGHT Limits: Min={overrides.doctrine_tight_min} | Max={overrides.doctrine_tight_max} sessions")
-                if overrides.doctrine_cooloff_enabled:
-                    lines.append(f"COOL-OFF: Floor=€{overrides.doctrine_cooloff_floor:.0f} | Recovery<{overrides.doctrine_cooloff_recovery_pct*100:.0f}% | Min={overrides.doctrine_cooloff_min_months}mo")
-            else:
-                lines.append("\n=== DOCTRINE ENGINE: DISABLED ===")
-            
-            lines.append("\n=== PERFORMANCE RESULTS ===")
-            lines.append(f"Total Survival Rate: {score_survival:.1f}%")
-            lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
-            lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
-            lines.append(f"Active Play Time: {active_pct:.1f}%")
-            
-            # Tie Betting Statistics
-            if y1_log and switch_tie_bet.value:
-                total_ties = sum(e.get('tie_count', 0) for e in y1_log)
-                total_tie_bets = sum(e.get('tie_bets', 0) for e in y1_log)
-                total_tie_pnl = sum(e.get('tie_pnl', 0) for e in y1_log)
-                if total_ties > 0:
-                    lines.append("\n=== TIE BETTING STATISTICS ===")
-                    lines.append(f"Total Ties: {total_ties}")
-                    lines.append(f"Tie Bets Placed: {total_tie_bets}")
-                    lines.append(f"Tie Bet P&L: €{total_tie_pnl:,.2f}")
-                    lines.append(f"Tie Bet Win Rate: {(total_tie_pnl / (total_tie_bets * 10) if total_tie_bets > 0 else 0):.1%}")
-            
-            if y1_log:
-                lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
-                lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Tie_Count,Tie_Bets,Tie_PL")
-                for e in y1_log:
-                    lines.append(
-                        f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
-                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']},"
-                        f"{e.get('tie_count', 0)},{e.get('tie_bets', 0)},{e.get('tie_pnl', 0):.0f}"
-                    )
-            
-            # SAFE STRING FORMATTING FOR REPORT
-            log_content = "\n".join(lines)
-            ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
+            with report_container:
+                report_container.clear()
+                lines = ["=== BACCARAT CONFIGURATION ==="]
+                lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
+                lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']}")
+                lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins})")
+                lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
+                lines.append(f"Smart Trailing Stop: {overrides.smart_exit_enabled} (Window: Hand {overrides.smart_window_start}, Min Lock: {overrides.min_profit_to_lock}u, Drop: {overrides.trailing_drop_pct*100:.0f}%)")
+                lines.append("\n=== PERFORMANCE RESULTS ===")
+                lines.append(f"Total Survival Rate: {score_survival:.1f}%")
+                lines.append(f"Grand Total Wealth: €{grand_total_wealth:,.0f}")
+                lines.append(f"Real Monthly Cost: €{real_monthly_cost:,.0f}")
+                lines.append(f"Active Play Time: {active_pct:.1f}%")
+                
+                if y1_log:
+                    lines.append("\n=== YEAR 1 COMPREHENSIVE DATA (COPY/PASTE) ===")
+                    # Full baccarat export fields from CSV_DATA_DICTIONARY.md
+                    lines.append("Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Peak_Profit")
+                    for e in y1_log:
+                        # Use .get with defaults for robustness
+                        lines.append(
+                            f"{e.get('month','')},{e.get('session','')},{e.get('result',0):.0f},{e.get('balance',0):.0f},{e.get('game_bal',0):.0f},"
+                            f"{e.get('hands',0)},{e.get('volume',0):.0f},{e.get('tier','')},{e.get('exit','')},{e.get('streak_max',0)},{e.get('peak_profit',0):.0f}"
+                        )
+                
+                # SAFE STRING FORMATTING FOR REPORT
+                log_content = "\n".join(lines)
+                ui.html(f'<pre style="white-space: pre-wrap; font-family: monospace; color: #94a3b8; font-size: 0.75rem;">{log_content}</pre>', sanitize=False)
 
     # --- UI LAYOUT ---
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
         ui.label('BACCARAT LAB (MONACO RULES)').classes('text-2xl font-light text-cyan-400')
-        
-        with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
+
+
             
             # STRATEGY LIBRARY RESTORED HERE
             with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full bg-slate-800 text-slate-300 mb-4'):
@@ -903,19 +622,17 @@ def show_simulator():
                         slider_tax_thresh = ui.slider(min=5000, max=50000, value=12500); ui.label().bind_text_from(slider_tax_thresh, 'value', lambda v: f'Tax Thresh €{v}')
                         slider_tax_rate = ui.slider(min=5, max=50, value=25)
 
+                    # Smart Trailing Toggle (move out of eco settings)
+                    with ui.row().classes('w-full justify-between mt-2'):
+                        ui.label('Smart Trailing Stop').classes('text-xs text-slate-400')
+                        smart_trailing_toggle = ui.switch('Enable', value=True).classes('ml-2')
+
                 with ui.column():
                     ui.label('BACCARAT GAMEPLAY').classes('font-bold text-cyan-400')
                     
                     select_bet_strat = ui.select(['BANKER', 'PLAYER'], value='BANKER', label='Bet Selection').classes('w-full')
                     
                     slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes (approx {v*70} hands)')
-                    
-                    with ui.row().classes('items-center mt-2'):
-                        switch_tie_bet = ui.switch('🎲 Tie Follow Betting').props('color=cyan')
-                        switch_tie_bet.value = False
-                        ui.label('(1u bet after each tie)').classes('text-xs text-slate-400')
-                    
-                    ui.separator().classes('bg-slate-700 my-2')
                     
                     slider_stop_loss = ui.slider(min=0, max=100, value=10).props('color=red'); ui.label().bind_text_from(slider_stop_loss, 'value', lambda v: f'Stop {v}u')
                     slider_profit = ui.slider(min=1, max=100, value=10).props('color=green'); ui.label().bind_text_from(slider_profit, 'value', lambda v: f'Target {v}u')
@@ -928,143 +645,6 @@ def show_simulator():
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
                     slider_iron_gate = ui.slider(min=2, max=10, value=3).props('color=purple'); ui.label().bind_text_from(slider_iron_gate, 'value', lambda v: f'Iron Gate {v}')
-                    
-                    # Smart Trailing Stop Controls
-                    ui.separator().classes('bg-slate-700 my-2')
-                    ui.label('🎯 SMART TRAILING STOP (190-220 hands)').classes('text-xs text-yellow-400 font-bold')
-                    switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
-                    switch_smart_exit.value = True
-                    with ui.row().classes('w-full justify-between items-center'): 
-                        ui.label('Start Window').classes('text-xs text-slate-400')
-                        lbl_smart_window = ui.label()
-                    slider_smart_window = ui.slider(min=10, max=240, value=190, step=10).props('color=yellow')
-                    lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Hand {int(v)}')
-                    with ui.row().classes('w-full justify-between items-center'): 
-                        ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
-                        lbl_min_lock = ui.label()
-                    slider_min_lock = ui.slider(min=5, max=50, value=20, step=5).props('color=yellow')
-                    lbl_min_lock.bind_text_from(slider_min_lock, 'value', lambda v: f'+{int(v)}u')
-                    with ui.row().classes('w-full justify-between items-center'): 
-                        ui.label('Trailing Drop %').classes('text-xs text-slate-400')
-                        lbl_trail_pct = ui.label()
-                    slider_trail_pct = ui.slider(min=0.10, max=0.40, value=0.20, step=0.05).props('color=yellow')
-                    lbl_trail_pct.bind_text_from(slider_trail_pct, 'value', lambda v: f'{int(v*100)}%')
-                
-                # ============================================================================
-                # DOCTRINE ENGINE v1.0 - DYNAMIC STATE-DRIVEN BETTING
-                # ============================================================================
-                with ui.card().classes('w-full bg-slate-800 p-4 border-2 border-purple-500 mb-4'):
-                    ui.label('⚡ DOCTRINE ENGINE v1.0 - STATE-DRIVEN BETTING').classes('font-bold text-purple-400 text-lg mb-4')
-                    ui.label('Automatically switches between PLATINUM → TIGHT → COOL_OFF based on results').classes('text-xs text-slate-400 mb-3')
-                    
-                    switch_doctrine_enabled = ui.switch('Enable Doctrine Engine').props('color=purple')
-                    switch_doctrine_enabled.value = False
-                    
-                    # PLATINUM DOCTRINE
-                    with ui.expansion('💎 PLATINUM Doctrine (Standard Evening)', icon='star').classes('w-full bg-gradient-to-r from-purple-900 to-indigo-900 text-white mb-2'):
-                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
-                            with ui.column():
-                                ui.label('Stop-Loss (units)').classes('text-xs text-slate-300')
-                                slider_doctrine_pl_stop = ui.slider(min=5, max=50, value=10, step=1).props('color=purple')
-                                ui.label().bind_text_from(slider_doctrine_pl_stop, 'value', lambda v: f'{int(v)}u')
-                            with ui.column():
-                                ui.label('Target (units)').classes('text-xs text-slate-300')
-                                slider_doctrine_pl_target = ui.slider(min=5, max=50, value=10, step=1).props('color=purple')
-                                ui.label().bind_text_from(slider_doctrine_pl_target, 'value', lambda v: f'{int(v)}u')
-                            with ui.column():
-                                ui.label('Press Wins').classes('text-xs text-slate-300')
-                                slider_doctrine_pl_press_wins = ui.slider(min=1, max=10, value=3, step=1).props('color=purple')
-                                ui.label().bind_text_from(slider_doctrine_pl_press_wins, 'value', lambda v: f'{int(v)} wins')
-                            with ui.column():
-                                ui.label('Press Depth').classes('text-xs text-slate-300')
-                                slider_doctrine_pl_press_depth = ui.slider(min=1, max=10, value=3, step=1).props('color=purple')
-                                ui.label().bind_text_from(slider_doctrine_pl_press_depth, 'value', lambda v: f'{int(v)} max' if v < 10 else 'Unlimited')
-                            with ui.column():
-                                ui.label('Iron Gate').classes('text-xs text-slate-300')
-                                slider_doctrine_pl_iron = ui.slider(min=2, max=10, value=3, step=1).props('color=purple')
-                                ui.label().bind_text_from(slider_doctrine_pl_iron, 'value', lambda v: f'{int(v)} losses')
-                    
-                    # TIGHT DOCTRINE
-                    with ui.expansion('🛡️ TIGHT Doctrine (Recovery Mode)', icon='shield').classes('w-full bg-gradient-to-r from-orange-900 to-red-900 text-white mb-2'):
-                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
-                            with ui.column():
-                                ui.label('Stop-Loss (units)').classes('text-xs text-slate-300')
-                                slider_doctrine_ti_stop = ui.slider(min=3, max=20, value=5, step=1).props('color=orange')
-                                ui.label().bind_text_from(slider_doctrine_ti_stop, 'value', lambda v: f'{int(v)}u')
-                            with ui.column():
-                                ui.label('Target (units)').classes('text-xs text-slate-300')
-                                slider_doctrine_ti_target = ui.slider(min=3, max=20, value=5, step=1).props('color=orange')
-                                ui.label().bind_text_from(slider_doctrine_ti_target, 'value', lambda v: f'{int(v)}u')
-                            with ui.column():
-                                ui.label('Press Wins').classes('text-xs text-slate-300')
-                                slider_doctrine_ti_press_wins = ui.slider(min=3, max=15, value=5, step=1).props('color=orange')
-                                ui.label().bind_text_from(slider_doctrine_ti_press_wins, 'value', lambda v: f'{int(v)} wins')
-                            with ui.column():
-                                ui.label('Press Depth').classes('text-xs text-slate-300')
-                                slider_doctrine_ti_press_depth = ui.slider(min=0, max=3, value=1, step=1).props('color=orange')
-                                ui.label().bind_text_from(slider_doctrine_ti_press_depth, 'value', lambda v: f'{int(v)} max')
-                            with ui.column():
-                                ui.label('Iron Gate').classes('text-xs text-slate-300')
-                                slider_doctrine_ti_iron = ui.slider(min=1, max=5, value=2, step=1).props('color=orange')
-                                ui.label().bind_text_from(slider_doctrine_ti_iron, 'value', lambda v: f'{int(v)} losses')
-                    
-                    # TRIGGERS
-                    with ui.expansion('🚨 Triggers (PLATINUM → TIGHT)', icon='warning').classes('w-full bg-slate-900 text-white mb-2'):
-                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
-                            with ui.column():
-                                ui.label('Big Loss Trigger (units)').classes('text-xs text-slate-300')
-                                ui.label('Single loss > this triggers TIGHT').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_loss_trigger = ui.slider(min=5, max=20, value=8, step=1).props('color=red')
-                                ui.label().bind_text_from(slider_doctrine_loss_trigger, 'value', lambda v: f'-{int(v)}u')
-                            with ui.column():
-                                ui.label('Drawdown % Trigger').classes('text-xs text-slate-300')
-                                ui.label('% drop from peak GA').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_dd_pct = ui.slider(min=0.05, max=0.30, value=0.15, step=0.01).props('color=red')
-                                ui.label().bind_text_from(slider_doctrine_dd_pct, 'value', lambda v: f'{int(v*100)}%')
-                            with ui.column().classes('col-span-2'):
-                                ui.label('Drawdown € Trigger').classes('text-xs text-slate-300')
-                                ui.label('Absolute € drop from peak (0 = disabled)').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_dd_eur = ui.slider(min=0, max=10000, value=3000, step=500).props('color=red')
-                                ui.label().bind_text_from(slider_doctrine_dd_eur, 'value', lambda v: f'€{int(v):,}' if v > 0 else 'Disabled')
-                    
-                    # TIGHT SESSION LIMITS
-                    with ui.expansion('⏱️ TIGHT Session Limits', icon='schedule').classes('w-full bg-slate-900 text-white mb-2'):
-                        with ui.grid(columns=2).classes('w-full gap-3 p-3'):
-                            with ui.column():
-                                ui.label('Minimum TIGHT Sessions').classes('text-xs text-slate-300')
-                                ui.label('Before checking recovery').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_tight_min = ui.slider(min=1, max=5, value=1, step=1).props('color=yellow')
-                                ui.label().bind_text_from(slider_doctrine_tight_min, 'value', lambda v: f'{int(v)} sessions')
-                            with ui.column():
-                                ui.label('Maximum TIGHT Sessions').classes('text-xs text-slate-300')
-                                ui.label('Before COOL_OFF if still struggling').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_tight_max = ui.slider(min=1, max=5, value=2, step=1).props('color=yellow')
-                                ui.label().bind_text_from(slider_doctrine_tight_max, 'value', lambda v: f'{int(v)} sessions')
-                    
-                    # COOL-OFF MODE
-                    with ui.expansion('❄️ COOL-OFF Mode (Safety)', icon='ac_unit').classes('w-full bg-gradient-to-r from-blue-900 to-cyan-900 text-white mb-2'):
-                        switch_doctrine_cooloff = ui.switch('Enable Cool-Off Mode').props('color=cyan')
-                        switch_doctrine_cooloff.value = True
-                        with ui.grid(columns=2).classes('w-full gap-3 p-3 mt-2'):
-                            with ui.column():
-                                ui.label('GA Floor (Insolvency)').classes('text-xs text-slate-300')
-                                ui.label('Bankroll < this triggers COOL_OFF').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_cooloff_floor = ui.slider(min=1000, max=10000, value=3000, step=500).props('color=cyan')
-                                ui.label().bind_text_from(slider_doctrine_cooloff_floor, 'value', lambda v: f'€{int(v):,}')
-                            with ui.column():
-                                ui.label('Minimum Cool-Off Months').classes('text-xs text-slate-300')
-                                ui.label('Mandatory recovery time').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_cooloff_months = ui.slider(min=1, max=6, value=1, step=1).props('color=cyan')
-                                ui.label().bind_text_from(slider_doctrine_cooloff_months, 'value', lambda v: f'{int(v)} months')
-                            with ui.column().classes('col-span-2'):
-                                ui.label('Recovery Threshold (%)').classes('text-xs text-slate-300')
-                                ui.label('Drawdown < this % allows return to PLATINUM').classes('text-xs text-slate-500 italic')
-                                slider_doctrine_recovery_pct = ui.slider(min=0.03, max=0.15, value=0.07, step=0.01).props('color=cyan')
-                                ui.label().bind_text_from(slider_doctrine_recovery_pct, 'value', lambda v: f'{int(v*100)}%')
-                    
-                    # Note: Roulette coupling not relevant for Baccarat sim
-                    ui.label('Note: Roulette coupling settings available in Roulette Simulator').classes('text-xs text-slate-500 italic mt-2')
-
 
             ui.separator().classes('bg-slate-700')
             with ui.row().classes('w-full items-center justify-between'):
@@ -1081,7 +661,6 @@ def show_simulator():
         
         ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
         chart_single_container = ui.column().classes('w-full mt-2')
-        session_detail_container = ui.column().classes('w-full mt-2')
         
         flight_recorder_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')

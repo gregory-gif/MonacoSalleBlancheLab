@@ -7,8 +7,8 @@ from ui.tracker import render_page as show_tracker
 from ui.simulator import show_simulator
 from ui.career_mode import show_career_mode
 from ui.roulette_sim import show_roulette_sim
-from ui.sessions_sim import show_sessions_sim
 from ui.docs_viewer import show_docs_viewer
+from ui.sessions_sim import show_sessions_sim
 
 # ==============================================================================
 # 1. SECURITY SETUP
@@ -75,9 +75,9 @@ def main_page():
                           on_click=lambda: load_module(show_career_mode)
                          ).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
                 
-                ui.button('SESSIONS SIM', icon='layers', 
+                ui.button('SESSIONS SIM', icon='event_repeat', 
                           on_click=lambda: load_module(show_sessions_sim)
-                         ).props('flat align=left').classes('w-full text-slate-200 hover:bg-slate-700')
+                         ).props('flat align=left').classes('w-full text-orange-300 hover:bg-slate-700')
                 
                 ui.separator().classes('bg-slate-700 my-2 opacity-50')
                 
