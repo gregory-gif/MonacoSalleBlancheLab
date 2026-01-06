@@ -997,25 +997,6 @@ def show_roulette_sim():
         
         # RESTORED METRIC:
         real_monthly_cost = (stats['total_input'] - total_output) / (config['years']*12)
-        # Write to CSV (session_log.csv) with consistent sign: positive=cost, negative=profit
-        import csv
-        from datetime import datetime
-        csv_path = 'session_log.csv'
-        # Check if file exists and if header is present
-        try:
-            with open(csv_path, 'r') as f:
-                has_header = 'real_monthly_cost' in f.readline()
-        except FileNotFoundError:
-            has_header = False
-        # Write header if needed
-        if not has_header:
-            with open(csv_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['date','real_monthly_cost'])
-        # Append the new result
-        with open(csv_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([datetime.now().strftime('%Y-%m-%d %H:%M:%S'), f"{real_monthly_cost:.2f}"])
         
         insolvency_pct = (stats['avg_insolvent'] / (config['years']*12)) * 100
         active_pct = 100 - insolvency_pct
@@ -1042,16 +1023,13 @@ def show_roulette_sim():
                             ui.label(f"{grade}").classes(f'text-6xl font-black {g_col} leading-none')
                             ui.label(f"{total_score:.1f}% Score").classes(f'text-sm font-bold {g_col}')
                         with ui.column().classes('items-center'):
-                            ui.label('REAL MONTHLY COST/PROFIT').classes('text-[10px] text-slate-500 font-bold tracking-widest')
+                            ui.label('REAL MONTHLY COST').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             if real_monthly_cost > 0:
                                 ui.label(f"€{real_monthly_cost:,.0f}").classes('text-4xl font-black text-red-400 leading-none')
                                 ui.label("Net Cost").classes('text-xs font-bold text-red-900 bg-red-400 px-1 rounded')
-                            elif real_monthly_cost < 0:
-                                ui.label(f"€{real_monthly_cost:,.0f}").classes('text-4xl font-black text-green-400 leading-none')
-                                ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
                             else:
-                                ui.label("€0").classes('text-4xl font-black text-slate-400 leading-none')
-                                ui.label("Break Even").classes('text-xs font-bold text-slate-900 bg-slate-400 px-1 rounded')
+                                ui.label(f"+€{abs(real_monthly_cost):,.0f}").classes('text-4xl font-black text-green-400 leading-none')
+                                ui.label("Net Profit").classes('text-xs font-bold text-green-900 bg-green-400 px-1 rounded')
                         with ui.column().classes('items-center'):
                             ui.label('SPICE FREQUENCY').classes('text-[10px] text-slate-500 font-bold tracking-widest')
                             spice_sessions = stats['spice_stats'].get('sessions_with_spices', 0)

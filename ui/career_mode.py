@@ -8,8 +8,12 @@ from copy import deepcopy
 # --- CRITICAL FIX: IMPORT BACCARAT WORKER ---
 from ui.simulator import BaccaratWorker # Changed from SimulationWorker
 from ui.roulette_sim import RouletteWorker
-from engine.strategy_rules import StrategyOverrides, BetStrategy, PlayMode
+from engine.strategy_rules import StrategyOverrides, BetStrategy, PlayMode, build_doctrine_configs_from_overrides
 from engine.tier_params import get_tier_for_ga, generate_tier_map
+from engine.doctrine_engine import (
+    DoctrineContext, choose_state_for_next_session, update_after_session,
+    update_after_month, get_doctrine_config, log_state_transition
+)
 from utils.persistence import load_profile
 
 # List of Roulette-specific bets to detect Game Type
@@ -17,7 +21,7 @@ ROULETTE_BETS = {'Red', 'Black', 'Even', 'Odd', '1-18', '19-36'}
 
 class CareerManager:
     @staticmethod
-    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year):
+    def run_compound_career(sequence_config, start_ga, total_years, sessions_per_year, fallback_threshold_pct=0.80, promotion_buffer_pct=1.20, trailing_fallback_pct=0.90):
         current_ga = start_ga
         current_leg_idx = 0
         
@@ -29,6 +33,27 @@ class CareerManager:
         # Extract Params & Detect Game Type
         overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
         
+        # === DOCTRINE ENGINE INITIALIZATION ===
+        doctrine_enabled = active_config.get('doctrine_en', False)
+        doctrine_ctx = None
+        platinum_cfg = None
+        tight_cfg = None
+        state_rules = None
+        
+        if doctrine_enabled:
+            # Build doctrine configurations from overrides
+            platinum_cfg, tight_cfg, state_rules = build_doctrine_configs_from_overrides(overrides)
+            
+            # Initialize doctrine context
+            doctrine_ctx = DoctrineContext(
+                state="PLATINUM",
+                GA_current=current_ga,
+                GA_peak=current_ga,
+                last_result_u=0.0,
+                tight_sessions_done=0,
+                cooloff_months_done=0
+            )
+        
         trajectory = []
         log = []
         months = total_years * 12
@@ -37,17 +62,94 @@ class CareerManager:
         
         total_input = start_ga
         
+        # Track thresholds for fallback mechanism
+        promotion_thresholds = [0]  # Track threshold that triggered each leg promotion
+        trailing_active = [False] * len(sequence_config)  # Track if trailing fallback is active for each leg
+        trailing_peak = [start_ga]  # Track peak GA reached in each leg for trailing calculation
+        
         for m in range(months):
-            # 1. CHECK FOR PROMOTION
+            # 1. CHECK FOR DEMOTION (Fallback to previous strategy if bankroll drops too low)
+            if current_leg_idx > 0:
+                # Update trailing peak if we've reached new high in current leg
+                old_peak = trailing_peak[current_leg_idx]
+                if current_ga > trailing_peak[current_leg_idx]:
+                    trailing_peak[current_leg_idx] = current_ga
+                    trailing_active[current_leg_idx] = True  # Activate trailing once we exceed promotion threshold
+                    
+                    # Log peak update
+                    new_threshold = current_ga * trailing_fallback_pct
+                    log.append({
+                        'month': m+1,
+                        'event': 'PEAK_UPDATE',
+                        'details': f"New Peak: €{current_ga:,.0f} (was €{old_peak:,.0f}), Trailing FB @ €{new_threshold:,.0f}"
+                    })
+                
+                # Standard fallback check
+                fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
+                
+                # Trailing fallback check - if enabled and we drop X% from peak
+                trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else 0
+                
+                # Use MAX to trigger on whichever threshold is MORE protective (higher)
+                if current_ga < max(fallback_threshold, trailing_threshold):
+                    # Determine which mechanism triggered
+                    mechanism = "STANDARD"
+                    threshold_value = fallback_threshold
+                    if trailing_active[current_leg_idx] and trailing_threshold > fallback_threshold:
+                        mechanism = "🔄 TRAILING"
+                        threshold_value = trailing_threshold
+                    
+                    # Demote to previous strategy
+                    current_leg_idx -= 1
+                    prev_leg = sequence_config[current_leg_idx]
+                    
+                    # Reset trailing for demoted leg (we're dropping back)
+                    if current_leg_idx + 1 < len(trailing_active):
+                        trailing_active[current_leg_idx + 1] = False
+                    if current_leg_idx + 1 < len(trailing_peak):
+                        trailing_peak[current_leg_idx + 1] = 0
+                    
+                    log.append({
+                        'month': m+1, 
+                        'event': 'FALLBACK', 
+                        'details': f"{mechanism} DEMOTED: {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{threshold_value:,.0f})"
+                    })
+                    
+                    active_strategy_name = prev_leg['strategy_name']
+                    active_config = prev_leg['config']
+                    active_target = prev_leg['target_ga']
+                    
+                    # Refresh Params for previous Leg
+                    overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
+                    
+                    # Reset Tier Level based on old map
+                    temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
+                    active_level = temp_tier.level
+            
+            # 2. CHECK FOR PROMOTION (with buffer to avoid flip-flopping)
             if current_leg_idx < len(sequence_config) - 1:
-                if current_ga >= active_target:
+                promotion_target = active_target * promotion_buffer_pct
+                if current_ga >= promotion_target:
                     current_leg_idx += 1
                     new_leg = sequence_config[current_leg_idx]
+                    
+                    # Store the threshold that triggered this promotion
+                    promotion_thresholds.append(promotion_target)
+                    
+                    # Initialize trailing tracking for this new leg
+                    while len(trailing_peak) <= current_leg_idx:
+                        trailing_peak.append(0)
+                        trailing_active.append(False)
+                    trailing_peak[current_leg_idx] = current_ga
+                    trailing_active[current_leg_idx] = True
+                    
+                    # Calculate what the trailing threshold will be
+                    trailing_threshold_value = current_ga * trailing_fallback_pct
                     
                     log.append({
                         'month': m+1, 
                         'event': 'PROMOTION', 
-                        'details': f"GRADUATED: {active_strategy_name} -> {new_leg['strategy_name']} (Bal: €{current_ga:,.0f})"
+                        'details': f"GRADUATED: {active_strategy_name} -> {new_leg['strategy_name']} (Bal: €{current_ga:,.0f}, Trailing FB will trigger @ €{trailing_threshold_value:,.0f})"
                     })
                     
                     active_strategy_name = new_leg['strategy_name']
@@ -61,7 +163,7 @@ class CareerManager:
                     temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
                     active_level = temp_tier.level
 
-            # 2. ECOSYSTEM (Tax/Contrib)
+            # 3. ECOSYSTEM (Tax/Contrib)
             tax_rate = active_config.get('eco_tax_rate', 25)
             tax_thresh = active_config.get('eco_tax_thresh', 12500)
             use_tax = active_config.get('eco_tax', False)
@@ -84,7 +186,7 @@ class CareerManager:
                 current_ga += amount
                 total_input += amount 
             
-            # 3. INSOLVENCY CHECK
+            # 4. INSOLVENCY CHECK
             insolvency_floor = active_config.get('eco_insolvency', 1000)
             if current_ga < insolvency_floor:
                 if len(log) == 0 or log[-1]['event'] != 'INSOLVENT':
@@ -92,37 +194,225 @@ class CareerManager:
                 trajectory.append(current_ga)
                 continue 
 
-            # 4. PLAY SESSIONS (DYNAMIC ENGINE SELECTION)
+            # === DOCTRINE STATE MACHINE ===
+            if doctrine_enabled and doctrine_ctx:
+                # Update context with current GA
+                doctrine_ctx.GA_current = current_ga
+                
+                # Determine next state
+                old_state = doctrine_ctx.state
+                new_state = choose_state_for_next_session(doctrine_ctx, state_rules)
+                
+                # Log state transition if changed
+                if new_state != old_state:
+                    reason = "Unknown"
+                    if new_state == "TIGHT":
+                        if doctrine_ctx.last_result_u <= -state_rules.loss_trigger_pl_u:
+                            reason = f"Big loss: -{abs(doctrine_ctx.last_result_u):.1f}u"
+                        else:
+                            dd_pct = (doctrine_ctx.GA_peak - current_ga) / doctrine_ctx.GA_peak if doctrine_ctx.GA_peak > 0 else 0
+                            reason = f"Drawdown: {dd_pct*100:.1f}%"
+                    elif new_state == "COOL_OFF":
+                        if current_ga < state_rules.cooloff_ga_floor:
+                            reason = f"Insolvency: €{current_ga:,.0f} < €{state_rules.cooloff_ga_floor:,.0f}"
+                        else:
+                            reason = "Max TIGHT sessions exhausted"
+                    elif new_state == "PLATINUM":
+                        reason = "Recovered from drawdown"
+                    
+                    log_state_transition(doctrine_ctx, old_state, new_state, reason)
+                    log.append({
+                        'month': m+1,
+                        'event': 'DOCTRINE',
+                        'details': f"Doctrine: {old_state} → {new_state} ({reason})"
+                    })
+                    doctrine_ctx.state = new_state
+                
+                # Get active doctrine config
+                active_doctrine_cfg = get_doctrine_config(doctrine_ctx.state, platinum_cfg, tight_cfg)
+                
+                # Override session parameters with doctrine config
+                overrides.stop_loss_units = int(active_doctrine_cfg.stop_loss_u)
+                overrides.profit_lock_units = int(active_doctrine_cfg.target_u)
+                overrides.press_trigger_wins = active_doctrine_cfg.press_wins
+                overrides.press_depth = active_doctrine_cfg.press_depth
+                overrides.iron_gate_limit = active_doctrine_cfg.iron_gate
+
+            # 5. PLAY SESSIONS (DYNAMIC ENGINE SELECTION)
             sessions_this_month = sessions_per_year // 12
             if m % 12 < (sessions_per_year % 12): 
                 sessions_this_month += 1
             
+            month_pnl = 0.0  # Track monthly P&L for doctrine
             for _ in range(sessions_this_month):
+                # === PRE-SESSION TRAILING FALLBACK CHECK ===
+                # Check BEFORE playing to prevent entering a session already below threshold
+                if current_leg_idx > 0:
+                    # Update trailing peak if we've reached new high
+                    if current_ga > trailing_peak[current_leg_idx]:
+                        trailing_peak[current_leg_idx] = current_ga
+                        trailing_active[current_leg_idx] = True
+                    
+                    # Check both fallback mechanisms BEFORE session starts
+                    fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
+                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else 0
+                    
+                    # Use MAX to trigger on whichever threshold is MORE protective (higher)
+                    if current_ga < max(fallback_threshold, trailing_threshold):
+                        # Determine which mechanism triggered
+                        mechanism = "STANDARD"
+                        threshold_value = fallback_threshold
+                        if trailing_active[current_leg_idx] and trailing_threshold > fallback_threshold:
+                            mechanism = "🔄 TRAILING"
+                            threshold_value = trailing_threshold
+                        
+                        # Demote to previous strategy
+                        current_leg_idx -= 1
+                        prev_leg = sequence_config[current_leg_idx]
+                        
+                        # Reset trailing for demoted leg
+                        if current_leg_idx + 1 < len(trailing_active):
+                            trailing_active[current_leg_idx + 1] = False
+                        if current_leg_idx + 1 < len(trailing_peak):
+                            trailing_peak[current_leg_idx + 1] = 0
+                        
+                        log.append({
+                            'month': m+1, 
+                            'event': 'FALLBACK', 
+                            'details': f"{mechanism} DEMOTED (pre-session): {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{threshold_value:,.0f})"
+                        })
+                        
+                        active_strategy_name = prev_leg['strategy_name']
+                        active_config = prev_leg['config']
+                        active_target = prev_leg['target_ga']
+                        
+                        # Refresh Params for previous Leg
+                        overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
+                        
+                        # Reset Tier Level based on old map
+                        temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
+                        active_level = temp_tier.level
+                        
+                        # Break out of remaining sessions this month to apply new strategy
+                        break
+                
+                session_ga_before = current_ga
+                
                 if game_type == 'Roulette':
-                    # --- ROULETTE ENGINE ---
-                    # Unpack only the first 4 values, ignore the rest
-                    pnl, vol, used_lvl, hands, *_ = RouletteWorker.run_session(
+                    # --- ROULETTE ENGINE (returns 10 values) ---
+                    pnl, vol, used_lvl, spins, spice_stats, exit_reason, max_caroline, max_dalembert, press_streak, peak_profit = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
                 else:
-                    # --- BACCARAT ENGINE (Updated Call) ---
-                    pnl, vol, used_lvl, hands, *_ = BaccaratWorker.run_session(
+                    # --- BACCARAT ENGINE (returns 9 values) ---
+                    pnl, vol, used_lvl, hands, exit_reason, press_streak, tie_count, tie_bets, tie_pnl, _, _ = BaccaratWorker.run_session(
                         current_ga, overrides, tier_map, use_ratch, use_penalty, active_level, mode, base_bet
                     )
+                
                 current_ga += pnl
+                month_pnl += pnl
                 active_level = used_lvl 
                 last_session_won = (pnl > 0)
+                
+                # === INTRA-SESSION TRAILING FALLBACK CHECK ===
+                # Check after each session to prevent large drawdowns within a month
+                if current_leg_idx > 0:
+                    # Update trailing peak if we've reached new high
+                    if current_ga > trailing_peak[current_leg_idx]:
+                        old_peak = trailing_peak[current_leg_idx]
+                        trailing_peak[current_leg_idx] = current_ga
+                        trailing_active[current_leg_idx] = True
+                        
+                        # Log significant peak updates (only if increase is meaningful, e.g., >1%)
+                        if (current_ga - old_peak) / old_peak > 0.01:
+                            new_threshold = current_ga * trailing_fallback_pct
+                            log.append({
+                                'month': m+1,
+                                'event': 'PEAK_UPDATE',
+                                'details': f"New Peak: €{current_ga:,.0f} (was €{old_peak:,.0f}), Trailing FB @ €{new_threshold:,.0f}"
+                            })
+                    
+                    # Check both fallback mechanisms
+                    fallback_threshold = promotion_thresholds[current_leg_idx] * fallback_threshold_pct
+                    trailing_threshold = trailing_peak[current_leg_idx] * trailing_fallback_pct if trailing_active[current_leg_idx] else 0
+                    
+                    # Use MAX to trigger on whichever threshold is MORE protective (higher)
+                    if current_ga < max(fallback_threshold, trailing_threshold):
+                        # Determine which mechanism triggered
+                        mechanism = "STANDARD"
+                        threshold_value = fallback_threshold
+                        if trailing_active[current_leg_idx] and trailing_threshold > fallback_threshold:
+                            mechanism = "🔄 TRAILING"
+                            threshold_value = trailing_threshold
+                        
+                        # Demote to previous strategy
+                        current_leg_idx -= 1
+                        prev_leg = sequence_config[current_leg_idx]
+                        
+                        # Reset trailing for demoted leg
+                        if current_leg_idx + 1 < len(trailing_active):
+                            trailing_active[current_leg_idx + 1] = False
+                        if current_leg_idx + 1 < len(trailing_peak):
+                            trailing_peak[current_leg_idx + 1] = 0
+                        
+                        log.append({
+                            'month': m+1, 
+                            'event': 'FALLBACK', 
+                            'details': f"{mechanism} DEMOTED (intra-month): {active_strategy_name} -> {prev_leg['strategy_name']} (Bal: €{current_ga:,.0f}, fell below €{threshold_value:,.0f})"
+                        })
+                        
+                        active_strategy_name = prev_leg['strategy_name']
+                        active_config = prev_leg['config']
+                        active_target = prev_leg['target_ga']
+                        
+                        # Refresh Params for previous Leg
+                        overrides, tier_map, safety, mode, use_ratch, use_penalty, game_type, base_bet = CareerManager._extract_params(active_config)
+                        
+                        # Reset Tier Level based on old map
+                        temp_tier = get_tier_for_ga(current_ga, tier_map, 1, mode, game_type=game_type)
+                        active_level = temp_tier.level
+                        
+                        # Break out of remaining sessions this month to apply new strategy
+                        break
+                
+                # Update doctrine after each session
+                if doctrine_enabled and doctrine_ctx:
+                    result_u = pnl / base_bet
+                    update_after_session(doctrine_ctx, result_u, current_ga, doctrine_ctx.state)
+            
+            # Update doctrine after month (for cool-off tracking)
+            if doctrine_enabled and doctrine_ctx:
+                update_after_month(doctrine_ctx)
             
             trajectory.append(current_ga)
             
             if m % 12 == 0:
+                year_num = (m // 12) + 1
+                status_detail = f"Year {year_num} | €{current_ga:,.0f} | {active_strategy_name} ({game_type})"
+                
+                # Add doctrine state to status if enabled
+                if doctrine_enabled and doctrine_ctx:
+                    status_detail += f" | Doctrine: {doctrine_ctx.state}"
+                
                 log.append({
                     'month': m+1, 
                     'event': 'STATUS', 
-                    'details': f"Year {(m//12)+1} | €{current_ga:,.0f} | {active_strategy_name} ({game_type})"
+                    'details': status_detail
                 })
 
-        return trajectory, log, current_ga, total_input
+        # Prepare doctrine summary if enabled
+        doctrine_summary = None
+        if doctrine_enabled and doctrine_ctx:
+            doctrine_summary = {
+                'final_state': doctrine_ctx.state,
+                'platinum_sessions': doctrine_ctx.platinum_sessions,
+                'tight_sessions': doctrine_ctx.tight_sessions,
+                'cooloff_months': doctrine_ctx.cooloff_months,
+                'transitions': doctrine_ctx.transitions,
+                'peak_ga': doctrine_ctx.GA_peak
+            }
+
+        return trajectory, log, current_ga, total_input, doctrine_summary
 
     @staticmethod
     def _extract_params(config):
@@ -154,16 +444,15 @@ class CareerManager:
             shoes_per_session=config.get('tac_shoes', 3),
             bet_strategy=bet_strat_obj,
             penalty_box_enabled=config.get('tac_penalty', True),
+            tie_bet_enabled=config.get('tie_bet_enabled', False),  # Respect user's saved setting
             
-            # Spice Configs (Safe Defaults)
-            spice_zero_enabled=config.get('spice_zero_en', False),
-            spice_zero_trigger=config.get('spice_zero_trig', 15),
-            spice_zero_max=config.get('spice_zero_max', 100),
-            spice_zero_cooldown=config.get('spice_zero_cool', 10),
-            spice_tiers_enabled=config.get('spice_tiers_en', False),
-            spice_tiers_trigger=config.get('spice_tiers_trig', 25),
-            spice_tiers_max=config.get('spice_tiers_max', 100),
-            spice_tiers_cooldown=config.get('spice_tiers_cool', 10)
+            # SPICE v5.0 Configs - Use defaults (all disabled) for career mode
+            # Individual spice types can be configured in the UI if needed
+            spice_global_max_per_session=config.get('spice_global_max_session', 3),
+            spice_global_max_per_spin=config.get('spice_global_max_spin', 1),
+            spice_disable_if_caroline_step4=config.get('spice_disable_caroline', True),
+            spice_disable_if_pl_below_zero=config.get('spice_disable_below_zero', True),
+            spice_unit_ratio=0.5 if config.get('spice_hybrid_mode', False) else 1.0
         )
         use_ratchet = config.get('risk_ratch', False)
         penalty_mode = config.get('tac_penalty', True)
@@ -202,35 +491,6 @@ def show_career_mode():
         legs.pop(index)
         refresh_leg_ui()
 
-    async def refresh_single_career():
-        if not legs: return
-        try:
-            profile = load_profile()
-            saved_strats = profile.get('saved_strategies', {})
-            sequence_config = []
-            for leg in legs:
-                cfg = saved_strats.get(leg['strategy'])
-                sequence_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
-            
-            traj, log, final, total_in = await asyncio.to_thread(
-                CareerManager.run_compound_career, sequence_config, slider_start_ga.value, slider_years.value, slider_freq.value
-            )
-            
-            chart_single_container.clear()
-            with chart_single_container:
-                res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
-                ui.label(f"Single Result: €{final:,.0f}").classes(f'text-lg font-bold {res_color} mb-1')
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
-                for leg in legs[:-1]:
-                    fig.add_hline(y=leg['target'], line_dash="dash", line_color="yellow")
-                fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
-                ui.plotly(fig).classes('w-full border border-slate-700 rounded')
-
-        except Exception as e:
-            ui.notify(str(e), type='negative')
-            print(traceback.format_exc())
-
     async def run_simulation():
         try:
             if not legs:
@@ -258,44 +518,58 @@ def show_career_mode():
 
             async def run_batch_with_progress():
                 batch_results = []
+                error_details = []
                 for i in range(num_sims):
                     try:
-                        traj, log, final_ga, total_in = CareerManager.run_compound_career(sequence_config, start_ga, years, sessions)
+                        traj, log, final_ga, total_in, doctrine_summary = CareerManager.run_compound_career(
+                            sequence_config, start_ga, years, sessions,
+                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0,
+                            slider_trailing_fallback.value / 100.0
+                        )
                         net_cost = total_in - final_ga
                         monthly_cost = net_cost / (years * 12)
                         batch_results.append({
                             'trajectory': traj,
                             'log': log,
                             'final': final_ga,
-                            'monthly_cost': monthly_cost
+                            'monthly_cost': monthly_cost,
+                            'doctrine_summary': doctrine_summary
                         })
                     except Exception as e:
+                        error_msg = f"Sim {i+1} error: {str(e)}"
+                        error_details.append(error_msg)
                         print(f"Simulation error: {e}")
-                        import traceback; traceback.print_exc()
+                        import traceback
+                        traceback.print_exc()
                         batch_results.append({
                             'trajectory': [],
                             'log': [
                                 {'month': 0, 'event': 'ERROR', 'details': str(e)}
                             ],
                             'final': 0,
-                            'monthly_cost': 0
+                            'monthly_cost': 0,
+                            'doctrine_summary': None,
+                            'error': str(e)
                         })
                     # Update progress bar (simulate progress)
                     progress.value = (i + 1) / num_sims
                     await asyncio.sleep(0)  # Yield to event loop for UI update
-                return batch_results
+                return batch_results, error_details
 
             # Set progress bar to determinate mode
             progress.props('color=purple')
             progress.value = 0
             progress.set_visibility(True)
-            results = await run_batch_with_progress()
+            results, error_details = await run_batch_with_progress()
             progress.set_visibility(False)
 
             # Filter out failed runs
             valid_results = [r for r in results if r['trajectory']]
             if not valid_results:
-                ui.notify('All simulations failed. Check logs for details.', type='negative')
+                error_msg = 'All simulations failed. Check logs for details.'
+                if error_details:
+                    error_msg += f'\n\nFirst error: {error_details[0]}'
+                ui.notify(error_msg, type='negative', timeout=10000)
                 return
 
             trajectories = np.array([r['trajectory'] for r in valid_results])
@@ -343,37 +617,294 @@ def show_career_mode():
                 for leg in legs[:-1]:
                     fig_multi.add_hline(y=leg['target'], line_dash="dash", line_color="white", opacity=0.3)
 
-                fig_multi.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                fig_multi.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                 ui.plotly(fig_multi).classes('w-full border border-slate-700 rounded mb-6')
 
+                # YOUR REALITY section - placed before CSV tools
                 ui.label('YOUR REALITY (Single Simulation #1)').classes('text-sm font-bold text-slate-400 mt-2')
 
                 sim1_traj = valid_results[0]['trajectory']
                 sim1_log = valid_results[0]['log']
                 sim1_final = valid_results[0]['final']
+                sim1_monthly_cost = valid_results[0]['monthly_cost']
 
-                chart_single_container.clear()
-                with chart_single_container:
+                # Create a dedicated container for single sim that can be refreshed
+                single_sim_chart = ui.column().classes('w-full')
+                with single_sim_chart:
                     res_color = "text-green-400" if sim1_final >= start_ga else "text-red-400"
                     ui.label(f"Result: €{sim1_final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                    
+                    # Display monthly cost
+                    cost_color = "text-red-400" if sim1_monthly_cost > 0 else "text-green-400"
+                    ui.label(f"Average Monthly Cost: €{sim1_monthly_cost:,.2f}").classes(f'text-sm font-semibold {cost_color} mb-2')
 
                     fig_single = go.Figure()
                     fig_single.add_trace(go.Scatter(y=sim1_traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
 
                     for leg in legs[:-1]:
                         fig_single.add_hline(y=leg['target'], line_dash="dash", line_color="yellow", annotation_text=f"Switch")
+                    
+                    # Add visual markers for FALLBACK events
+                    for event in sim1_log:
+                        if event['event'] == 'FALLBACK':
+                            month_idx = event['month'] - 1
+                            if 0 <= month_idx < len(sim1_traj):
+                                # Determine marker color based on fallback type
+                                is_trailing = '🔄 TRAILING' in event['details']
+                                marker_color = 'orange' if is_trailing else 'red'
+                                marker_symbol = 'triangle-down' if is_trailing else 'circle'
+                                label = 'Trailing FB' if is_trailing else 'Standard FB'
+                                
+                                # Add a marker at the fallback point
+                                fig_single.add_trace(go.Scatter(
+                                    x=[month_idx],
+                                    y=[sim1_traj[month_idx]],
+                                    mode='markers',
+                                    marker=dict(size=12, color=marker_color, symbol=marker_symbol, line=dict(width=2, color='white')),
+                                    name=label,
+                                    showlegend=True,
+                                    hovertext=event['details'],
+                                    hoverinfo='text'
+                                ))
 
-                    fig_single.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                    fig_single.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
                     ui.plotly(fig_single).classes('w-full border border-slate-700 rounded')
 
-                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_career).props('flat color=cyan dense').classes('mt-2')
+                # Refresh function that updates the single sim chart
+                async def refresh_single():
+                    if not legs: return
+                    try:
+                        profile = load_profile()
+                        saved_strats = profile.get('saved_strategies', {})
+                        refresh_config = []
+                        for leg in legs:
+                            cfg = saved_strats.get(leg['strategy'])
+                            refresh_config.append({'strategy_name': leg['strategy'], 'target_ga': leg['target'], 'config': cfg})
+                        
+                        traj, log, final, total_in, doctrine_summary = await asyncio.to_thread(
+                            CareerManager.run_compound_career, refresh_config, slider_start_ga.value, slider_years.value, slider_freq.value,
+                            slider_fallback.value / 100.0, slider_promotion_buffer.value / 100.0,
+                            slider_trailing_fallback.value / 100.0
+                        )
+                        
+                        # Calculate monthly cost for refreshed data
+                        net_cost = total_in - final
+                        monthly_cost = net_cost / (slider_years.value * 12)
+                        
+                        single_sim_chart.clear()
+                        with single_sim_chart:
+                            res_color = "text-green-400" if final >= slider_start_ga.value else "text-red-400"
+                            ui.label(f"Result: €{final:,.0f}").classes(f'text-xl font-bold {res_color} mb-2')
+                            
+                            # Display monthly cost
+                            cost_color = "text-red-400" if monthly_cost > 0 else "text-green-400"
+                            ui.label(f"Average Monthly Cost: €{monthly_cost:,.2f}").classes(f'text-sm font-semibold {cost_color} mb-2')
+                            
+                            # Add doctrine stats if available
+                            if doctrine_summary:
+                                ui.label(f"Doctrine: {doctrine_summary['final_state']} | "
+                                        f"Platinum: {doctrine_summary['platinum_sessions']}s | "
+                                        f"Tight: {doctrine_summary['tight_sessions']}s | "
+                                        f"Cool-Off: {doctrine_summary['cooloff_months']}m").classes('text-xs text-purple-400 mb-2')
+                            
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(y=traj, mode='lines', name='Balance', line=dict(color='#38bdf8', width=2)))
+                            for leg in legs[:-1]:
+                                fig.add_hline(y=leg['target'], line_dash="dash", line_color="yellow")
+                            
+                            # Add visual markers for FALLBACK events
+                            for event in log:
+                                if event['event'] == 'FALLBACK':
+                                    month_idx = event['month'] - 1
+                                    if 0 <= month_idx < len(traj):
+                                        # Determine marker color based on fallback type
+                                        is_trailing = '🔄 TRAILING' in event['details']
+                                        marker_color = 'orange' if is_trailing else 'red'
+                                        marker_symbol = 'triangle-down' if is_trailing else 'circle'
+                                        label = 'Trailing FB' if is_trailing else 'Standard FB'
+                                        
+                                        # Add a marker at the fallback point
+                                        fig.add_trace(go.Scatter(
+                                            x=[month_idx],
+                                            y=[traj[month_idx]],
+                                            mode='markers',
+                                            marker=dict(size=12, color=marker_color, symbol=marker_symbol, line=dict(width=2, color='white')),
+                                            name=label,
+                                            showlegend=True,
+                                            hovertext=event['details'],
+                                            hoverinfo='text'
+                                        ))
+                            
+                            fig.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#94a3b8'))
+                            ui.plotly(fig).classes('w-full border border-slate-700 rounded')
+
+                    except Exception as e:
+                        ui.notify(str(e), type='negative')
+                        print(traceback.format_exc())
+                
+                # REFRESH BUTTON right below the chart (placed after function definition)
+                ui.button('⚡ REFRESH SINGLE', on_click=refresh_single).props('flat color=cyan dense').classes('mt-2 mb-4')
+
+                # CSV Export for AI Analysis
+                with ui.card().classes('w-full bg-slate-900 p-4 mt-4 mb-4'):
+                    ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
+                    ui.label('Condensed data - Sim #1 trajectory + all final results').classes('text-xs text-slate-500 mb-2')
+                    
+                    # Generate condensed CSV - Only Sim #1 monthly trajectory
+                    # Get ecosystem settings from first leg
+                    first_leg_cfg = sequence_config[0]['config']
+                    contrib_win = first_leg_cfg.get('eco_win', 300)
+                    contrib_loss = first_leg_cfg.get('eco_loss', 300)
+                    
+                    csv_lines = []
+                    csv_lines.append('# CAREER SETTINGS')
+                    csv_lines.append(f'Start_GA,{start_ga:.2f}')
+                    csv_lines.append(f'Monthly_Contrib_Win,{contrib_win:.2f}')
+                    csv_lines.append(f'Monthly_Contrib_Loss,{contrib_loss:.2f}')
+                    csv_lines.append(f'Years,{years}')
+                    csv_lines.append(f'Sessions_Per_Year,{sessions}')
+                    csv_lines.append('')
+                    
+                    # Add Doctrine Engine Settings
+                    if first_leg_cfg.get('doctrine_enabled', False):
+                        csv_lines.append('# DOCTRINE ENGINE SETTINGS')
+                        csv_lines.append('Doctrine_Enabled,True')
+                        csv_lines.append(f"Platinum_StopLoss,{first_leg_cfg.get('doctrine_pl_stop', 10)}")
+                        csv_lines.append(f"Platinum_Target,{first_leg_cfg.get('doctrine_pl_target', 10)}")
+                        csv_lines.append(f"Platinum_PressWins,{first_leg_cfg.get('doctrine_pl_press_wins', 3)}")
+                        csv_lines.append(f"Platinum_PressDepth,{first_leg_cfg.get('doctrine_pl_press_depth', 3)}")
+                        csv_lines.append(f"Platinum_IronGate,{first_leg_cfg.get('doctrine_pl_iron', 3)}")
+                        csv_lines.append(f"Tight_StopLoss,{first_leg_cfg.get('doctrine_ti_stop', 5)}")
+                        csv_lines.append(f"Tight_Target,{first_leg_cfg.get('doctrine_ti_target', 5)}")
+                        csv_lines.append(f"Tight_PressWins,{first_leg_cfg.get('doctrine_ti_press_wins', 5)}")
+                        csv_lines.append(f"Tight_PressDepth,{first_leg_cfg.get('doctrine_ti_press_depth', 1)}")
+                        csv_lines.append(f"Tight_IronGate,{first_leg_cfg.get('doctrine_ti_iron', 2)}")
+                        csv_lines.append(f"Trigger_BigLoss,{first_leg_cfg.get('doctrine_loss_trigger', 8)}")
+                        csv_lines.append(f"Trigger_DrawdownPct,{first_leg_cfg.get('doctrine_dd_pct', 0.15)}")
+                        csv_lines.append(f"Trigger_DrawdownEur,{first_leg_cfg.get('doctrine_dd_eur', 3000)}")
+                        csv_lines.append(f"Tight_MinSessions,{first_leg_cfg.get('doctrine_tight_min', 1)}")
+                        csv_lines.append(f"Tight_MaxSessions,{first_leg_cfg.get('doctrine_tight_max', 2)}")
+                        csv_lines.append(f"CoolOff_Enabled,{first_leg_cfg.get('doctrine_cooloff_enabled', True)}")
+                        csv_lines.append(f"CoolOff_Floor,{first_leg_cfg.get('doctrine_cooloff_floor', 3000)}")
+                        csv_lines.append(f"CoolOff_MinMonths,{first_leg_cfg.get('doctrine_cooloff_months', 1)}")
+                        csv_lines.append(f"CoolOff_RecoveryPct,{first_leg_cfg.get('doctrine_recovery_pct', 0.07)}")
+                        csv_lines.append('')
+                    else:
+                        csv_lines.append('# DOCTRINE ENGINE SETTINGS')
+                        csv_lines.append('Doctrine_Enabled,False')
+                        csv_lines.append('')
+                    csv_lines.append('')
+                    csv_lines.append('# SIM #1 MONTHLY TRAJECTORY')
+                    csv_lines.append('Month,Bankroll')
+                    for month_idx, bankroll in enumerate(sim1_traj, 1):
+                        csv_lines.append(f"{month_idx},{bankroll:.2f}")
+                    
+                    # Add all simulations final results
+                    csv_lines.append('')
+                    csv_lines.append('# ALL SIMULATIONS FINAL RESULTS')
+                    csv_lines.append('Simulation,Final_Bankroll,Net_Profit,Success')
+                    for sim_idx, res in enumerate(valid_results, 1):
+                        final = res['final']
+                        net = final - start_ga
+                        success = 1 if final > start_ga else 0
+                        csv_lines.append(f"{sim_idx},{final:.2f},{net:.2f},{success}")
+                    
+                    # Add yearly milestones from Sim #1
+                    csv_lines.append('')
+                    csv_lines.append('# SIM #1 YEARLY MILESTONES')
+                    csv_lines.append('Year,Bankroll')
+                    for year in range(years):
+                        month_idx = (year + 1) * 12 - 1
+                        if month_idx < len(sim1_traj):
+                            csv_lines.append(f"{year+1},{sim1_traj[month_idx]:.2f}")
+                    
+                    csv_text = '\n'.join(csv_lines)
+                    csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
+                    
+                    def copy_career_csv():
+                        ui.run_javascript(f'navigator.clipboard.writeText(`{csv_text}`)')
+                        ui.notify('Career CSV copied to clipboard!', type='positive')
+                    
+                    ui.button('COPY CSV', on_click=copy_career_csv).props('icon=content_copy color=yellow').classes('w-full mt-2')
+                    
+                    # Summary statistics CSV
+                    ui.label('CAREER SUMMARY CSV').classes('text-xs font-bold text-slate-400 mt-4 mb-2')
+                    final_bankrolls = [r['final'] for r in valid_results]
+                    first_leg_cfg = sequence_config[0]['config']
+                    contrib_win = first_leg_cfg.get('eco_win', 300)
+                    contrib_loss = first_leg_cfg.get('eco_loss', 300)
+                    career_summary_csv = f"""Metric,Value
+Total_Simulations,{len(valid_results)}
+Start_GA,{start_ga:.2f}
+Monthly_Contrib_Win,{contrib_win:.2f}
+Monthly_Contrib_Loss,{contrib_loss:.2f}
+Years,{years}
+Sessions_Per_Year,{sessions}
+Survival_Rate,{survival_rate:.2f}
+Median_Final_Bankroll,{np.median(final_bankrolls):.2f}
+Avg_Final_Bankroll,{np.mean(final_bankrolls):.2f}
+Min_Final_Bankroll,{np.min(final_bankrolls):.2f}
+Max_Final_Bankroll,{np.max(final_bankrolls):.2f}
+Median_Monthly_Cost,{med_cost:.2f}
+Avg_Monthly_Cost,{avg_cost:.2f}
+Total_Months,{years * 12}
+Fallback_Threshold,{slider_fallback.value}
+Promotion_Buffer,{slider_promotion_buffer.value}
+Trailing_Fallback,{slider_trailing_fallback.value}"""
+                    
+                    career_summary_area = ui.textarea(value=career_summary_csv).classes('w-full font-mono text-xs').props('rows=15 readonly')
+                    
+                    def copy_career_summary():
+                        ui.run_javascript(f'navigator.clipboard.writeText(`{career_summary_csv}`)')
+                        ui.notify('Career summary copied!', type='positive')
+                    
+                    ui.button('COPY SUMMARY', on_click=copy_career_summary).props('icon=content_copy color=cyan').classes('w-full mt-2')
+                    
+                    # Event log CSV
+                    ui.label('EVENT LOG CSV (Sim #1)').classes('text-xs font-bold text-slate-400 mt-4 mb-2')
+                    event_csv_lines = ['Month,Event,Details']
+                    for l in sim1_log:
+                        # Escape commas in details
+                        details = l['details'].replace(',', ';')
+                        event_csv_lines.append(f"{l['month']},{l['event']},{details}")
+                    event_csv = '\\n'.join(event_csv_lines)
+                    
+                    event_csv_area = ui.textarea(value=event_csv).classes('w-full font-mono text-xs').props('rows=8 readonly')
+                    
+                    def copy_event_log():
+                        ui.run_javascript(f'navigator.clipboard.writeText(`{event_csv}`)')
+                        ui.notify('Event log copied!', type='positive')
+                    
+                    ui.button('COPY EVENT LOG', on_click=copy_event_log).props('icon=content_copy color=purple').classes('w-full mt-2')
 
                 with ui.expansion('Event Log (Sim #1)', icon='history').classes('w-full bg-slate-800 mt-4'):
                     for l in sim1_log:
                         color = "text-yellow-400" if l['event'] == 'PROMOTION' else "text-slate-400"
                         if l['event'] == 'INSOLVENT': color = "text-red-500 font-bold"
                         if l['event'] == 'ERROR': color = "text-red-600 font-bold"
+                        if l['event'] == 'DOCTRINE': color = "text-purple-400 font-bold"
+                        if l['event'] == 'PEAK_UPDATE': color = "text-green-400"
+                        if l['event'] == 'FALLBACK':
+                            # Distinguish between trailing and standard fallback
+                            if '🔄 TRAILING' in l['details']:
+                                color = "text-orange-400 font-bold"
+                            else:
+                                color = "text-red-400 font-bold"
                         ui.label(f"M{l['month']} | {l['event']}: {l['details']}").classes(f'text-xs {color}')
+                
+                # Doctrine Summary for Sim #1
+                if sim1_doctrine := valid_results[0].get('doctrine_summary'):
+                    with ui.expansion('⚡ Doctrine Summary (Sim #1)', icon='insights').classes('w-full bg-purple-900 mt-4'):
+                        ui.label(f"Final State: {sim1_doctrine['final_state']}").classes('text-sm text-white font-bold')
+                        ui.label(f"Peak GA: €{sim1_doctrine['peak_ga']:,.0f}").classes('text-xs text-slate-300')
+                        ui.label(f"Platinum Sessions: {sim1_doctrine['platinum_sessions']}").classes('text-xs text-slate-300')
+                        ui.label(f"Tight Sessions: {sim1_doctrine['tight_sessions']}").classes('text-xs text-slate-300')
+                        ui.label(f"Cool-Off Months: {sim1_doctrine['cooloff_months']}").classes('text-xs text-slate-300')
+                        
+                        if sim1_doctrine['transitions']:
+                            ui.label('State Transitions:').classes('text-xs text-purple-300 font-bold mt-2')
+                            for trans in sim1_doctrine['transitions'][:10]:  # Show first 10 transitions
+                                ui.label(f"Session {trans['session']}: {trans['from']} → {trans['to']} ({trans['reason']})").classes('text-xs text-slate-400')
         except Exception as e:
             ui.notify(f'Critical error: {e}', type='negative')
             import traceback; traceback.print_exc()
@@ -381,44 +912,65 @@ def show_career_mode():
             progress.set_visibility(False)
 
     # --- UI LAYOUT ---
-    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 p-4'):
+    with ui.column().classes('w-full max-w-7xl mx-auto gap-6 p-4'):
         ui.label('CAREER SIMULATOR (MULTI-STAGE)').classes('text-2xl font-light text-purple-300')
         ui.label('Chain strategies. Analyze Probability (Multiverse) vs Reality (Single).').classes('text-sm text-slate-500 -mt-4')
         
-        with ui.grid(columns=2).classes('w-full gap-6'):
-            # LEFT: CONTROLS
-            with ui.card().classes('w-full bg-slate-900 p-4'):
-                ui.label('1. BUILD SEQUENCE').classes('font-bold text-white mb-2')
-                
-                profile = load_profile()
-                saved = list(profile.get('saved_strategies', {}).keys())
-                
-                select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
-                ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
-                slider_target = ui.slider(min=1000, max=100000, step=1000, value=10000).props('color=yellow')
-                ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
-                
-                ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
-                
-                ui.separator().classes('bg-slate-700 my-4')
-                
-                ui.label('2. GLOBAL SETTINGS').classes('font-bold text-white mb-2')
-                slider_start_ga = ui.slider(min=1000, max=50000, value=2000).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'Start: €{v}')
-                slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
-                slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
-                
-                ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
-                slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
-                ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
-                
-                ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full mt-6')
+        # SETTINGS CARD AT TOP
+        with ui.card().classes('w-full bg-slate-900 p-6 gap-4'):
+            with ui.grid(columns=2).classes('w-full gap-6'):
+                # LEFT: CONTROLS
+                with ui.column().classes('w-full'):
+                    ui.label('1. BUILD SEQUENCE').classes('font-bold text-white mb-2')
+                    
+                    profile = load_profile()
+                    saved = list(profile.get('saved_strategies', {}).keys())
+                    
+                    select_strat = ui.select(saved, label='Select Strategy').classes('w-full')
+                    ui.label('Target Bankroll to Upgrade').classes('text-xs text-slate-500 mt-2')
+                    slider_target = ui.slider(min=2000, max=100000, step=1000, value=10000).props('color=yellow')
+                    ui.label().bind_text_from(slider_target, 'value', lambda v: f'Switch @ €{v:,.0f}')
+                    
+                    ui.button('ADD LEG', on_click=add_leg).props('icon=add color=purple').classes('w-full mt-4')
+                    
+                    ui.separator().classes('bg-slate-700 my-4')
+                    
+                    ui.label('2. GLOBAL SETTINGS').classes('font-bold text-white mb-2')
+                    slider_start_ga = ui.slider(min=1000, max=50000, value=2000).props('color=green'); ui.label().bind_text_from(slider_start_ga, 'value', lambda v: f'Start: €{v}')
+                    slider_years = ui.slider(min=1, max=20, value=5).props('color=blue'); ui.label().bind_text_from(slider_years, 'value', lambda v: f'{v} Years')
+                    slider_freq = ui.slider(min=10, max=100, value=20).props('color=blue'); ui.label().bind_text_from(slider_freq, 'value', lambda v: f'{v} Sess/Yr')
+                    
+                    ui.label('Universes (Simulations)').classes('text-xs text-slate-400 mt-2')
+                    slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan')
+                    ui.label().bind_text_from(slider_num_sims, 'value', lambda v: f'{v} Universes')
+                    
+                    ui.separator().classes('bg-slate-700 my-4')
+                    ui.label('🔄 FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
+                    ui.label('Fallback Threshold (% below promotion)').classes('text-xs text-slate-400')
+                    slider_fallback = ui.slider(min=60, max=95, value=80, step=5).props('color=orange')
+                    ui.label().bind_text_from(slider_fallback, 'value', lambda v: f'{v}% - Demote if bankroll drops below this')
+                    
+                    ui.label('Promotion Buffer (% above target)').classes('text-xs text-slate-400 mt-2')
+                    slider_promotion_buffer = ui.slider(min=100, max=150, value=120, step=5).props('color=yellow')
+                    ui.label().bind_text_from(slider_promotion_buffer, 'value', lambda v: f'{v}% - Promote when this reached')
+                    
+                    ui.separator().classes('bg-slate-700 my-2')
+                    ui.label('🔄 TRAILING FALLBACK MECHANISM').classes('font-bold text-orange-400 mb-2')
+                    ui.label('Trailing Fallback (% from peak after promotion)').classes('text-xs text-slate-400')
+                    slider_trailing_fallback = ui.slider(min=85, max=98, value=90, step=1).props('color=deep-orange')
+                    ui.label().bind_text_from(slider_trailing_fallback, 'value', lambda v: f'{v}% - Trailing stop from peak')
 
-            # RIGHT: SEQUENCE VIEW
-            with ui.column().classes('w-full'):
-                ui.label('CAREER PATH').classes('font-bold text-white mb-2')
-                legs_container = ui.column().classes('w-full')
-                progress = ui.linear_progress().props('indeterminate color=purple').classes('w-full'); progress.set_visibility(False)
-                results_area = ui.column().classes('w-full')
-                chart_single_container = ui.column().classes('w-full')
+                # RIGHT: SEQUENCE VIEW
+                with ui.column().classes('w-full'):
+                    ui.label('CAREER PATH').classes('font-bold text-white mb-2')
+                    legs_container = ui.column().classes('w-full')
+            
+            ui.separator().classes('bg-slate-700 my-4')
+            ui.button('RUN CAREER', on_click=run_simulation).props('icon=play_arrow color=green size=lg').classes('w-full')
+        
+        # RESULTS AREA BELOW SETTINGS
+        progress = ui.linear_progress().props('indeterminate color=purple').classes('w-full'); progress.set_visibility(False)
+        results_area = ui.column().classes('w-full')
+        chart_single_container = ui.column().classes('w-full')
 
     refresh_leg_ui()
