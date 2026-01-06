@@ -3,10 +3,13 @@ import plotly.graph_objects as go
 import random
 def save_current_strategy():
 
+    try:
         name = input_name.value
-        if not name: return
+        if not name:
+            return
         profile = load_profile()
-        if 'saved_strategies' not in profile: profile['saved_strategies'] = {}
+        if 'saved_strategies' not in profile:
+            profile['saved_strategies'] = {}
         config = {
             'sim_num': slider_num_sims.value, 'years': slider_years.value, 'freq': slider_frequency.value,
             'eco_win': slider_contrib_win.value, 'eco_loss': slider_contrib_loss.value, 'eco_tax': switch_luxury_tax.value,
@@ -14,9 +17,9 @@ def save_current_strategy():
             'eco_tax_thresh': slider_tax_thresh.value, 'eco_tax_rate': slider_tax_rate.value,
             'tac_safety': slider_safety.value, 'tac_iron': slider_iron_gate.value, 'tac_press': select_press.value,
             'tac_depth': slider_press_depth.value, 'tac_shoes': slider_shoes.value, 'tac_bet': select_bet_strat.value,
-            'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value, 
+            'tac_penalty': switch_penalty.value, 'tac_mode': select_engine_mode.value,
             'risk_stop': slider_stop_loss.value, 'risk_prof': slider_profit.value,
-            'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value, 
+            'risk_ratch': switch_ratchet.value, 'risk_ratch_mode': select_ratchet_mode.value,
             'gold_stat': select_status.value, 'gold_earn': slider_earn_rate.value, 'start_ga': slider_start_ga.value,
             'tac_base_bet': slider_base_bet.value
         }
@@ -24,7 +27,8 @@ def save_current_strategy():
         save_profile(profile)
         ui.notify(f'Saved: {name}', type='positive')
         update_strategy_list()
-    except Exception as e: ui.notify(str(e), type='negative')
+    except Exception as e:
+        ui.notify(str(e), type='negative')
 
     try:
         name = select_saved.value
