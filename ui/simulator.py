@@ -580,24 +580,26 @@ with ui.expansion('STRATEGY LIBRARY (Load/Save)', icon='save').classes('w-full b
             select_saved = ui.select([], label='Saved Strategies').props('dark').classes('flex-grow')
             ui.button('LOAD', on_click=load_selected_strategy).props('icon=file_upload color=blue')
             ui.button('DELETE', on_click=delete_selected_strategy).props('icon=delete color=red')
-        update_strategy_list()
 
-            ui.separator().classes('bg-slate-700')
+    update_strategy_list()
 
-            # ... (Sim Sliders) ...
-            with ui.row().classes('w-full gap-4 items-start'):
-                with ui.column().classes('flex-grow'):
-                    ui.label('SIMULATION').classes('font-bold text-white mb-2')
-                    with ui.row().classes('w-full justify-between'): ui.label('Universes').classes('text-xs text-slate-400'); lbl_num_sims = ui.label()
-                    slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan'); lbl_num_sims.bind_text_from(slider_num_sims, 'value', lambda v: f'{v}')
-                    with ui.row().classes('w-full justify-between'): ui.label('Years').classes('text-xs text-slate-400'); lbl_years = ui.label()
-                    slider_years = ui.slider(min=1, max=10, value=10).props('color=blue'); lbl_years.bind_text_from(slider_years, 'value', lambda v: f'{v}')
-                    with ui.row().classes('w-full justify-between'): ui.label('Sessions/Year').classes('text-xs text-slate-400'); lbl_freq = ui.label()
-                    slider_frequency = ui.slider(min=10, max=100, value=20).props('color=blue'); lbl_freq.bind_text_from(slider_frequency, 'value', lambda v: f'{v}')
+ui.separator().classes('bg-slate-700')
 
-                with ui.column().classes('w-1/2'):
-                    ui.label('LADDER PREVIEW').classes('font-bold text-white mb-2')
-                    with ui.expansion('View Table', icon='list').classes('w-full bg-slate-800 text-slate-300'): ladder_grid = ui.aggrid({'columnDefs': [{'headerName': 'Tier', 'field': 'tier', 'width': 70},{'headerName': 'Bet', 'field': 'bet', 'width': 120},{'headerName': 'Start GA', 'field': 'start', 'width': 120}],'rowData': []}).classes('h-40 w-full theme-balham-dark')
+# ... (Sim Sliders) ...
+with ui.row().classes('w-full gap-4 items-start'):
+    with ui.column().classes('flex-grow'):
+        ui.label('SIMULATION').classes('font-bold text-white mb-2')
+        with ui.row().classes('w-full justify-between'): ui.label('Universes').classes('text-xs text-slate-400'); lbl_num_sims = ui.label()
+        slider_num_sims = ui.slider(min=10, max=1000, value=20).props('color=cyan'); lbl_num_sims.bind_text_from(slider_num_sims, 'value', lambda v: f'{v}')
+        with ui.row().classes('w-full justify-between'): ui.label('Years').classes('text-xs text-slate-400'); lbl_years = ui.label()
+        slider_years = ui.slider(min=1, max=10, value=10).props('color=blue'); lbl_years.bind_text_from(slider_years, 'value', lambda v: f'{v}')
+        with ui.row().classes('w-full justify-between'): ui.label('Sessions/Year').classes('text-xs text-slate-400'); lbl_freq = ui.label()
+        slider_frequency = ui.slider(min=10, max=100, value=20).props('color=blue'); lbl_freq.bind_text_from(slider_frequency, 'value', lambda v: f'{v}')
+
+    with ui.column().classes('w-1/2'):
+        ui.label('LADDER PREVIEW').classes('font-bold text-white mb-2')
+        with ui.expansion('View Table', icon='list').classes('w-full bg-slate-800 text-slate-300'):
+            ladder_grid = ui.aggrid({'columnDefs': [{'headerName': 'Tier', 'field': 'tier', 'width': 70},{'headerName': 'Bet', 'field': 'bet', 'width': 120},{'headerName': 'Start GA', 'field': 'start', 'width': 120}],'rowData': []}).classes('h-40 w-full theme-balham-dark')
 
             ui.separator().classes('bg-slate-700')
 
