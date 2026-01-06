@@ -96,10 +96,10 @@ class SpicePattern:
     """Defines the actual roulette bet structure for a spice"""
     pattern_id: str
     spice_type: SpiceType
-    unit_cost: int                           # Number of units required
+    unit_cost: int                           # Total number of units (chips) required
     numbers_covered: List[int]               # All winning numbers
-    bet_structure: Dict[str, any]            # Detailed bet layout
-    payout_map: Dict[int, float]             # number -> payout multiplier
+    bet_structure: Dict[str, any]            # Detailed bet layout with chip counts
+    # bet_structure format: {"straight_up": [(number, chips)], "splits": [([n1,n2], chips)], ...}
 
 
 # ============================================================================
@@ -113,14 +113,8 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=3,
         numbers_covered=[0, 3, 12, 15, 26, 32, 35],
         bet_structure={
-            "straight_up": [26],
-            "splits": [[0, 3], [12, 15], [32, 35]]
-        },
-        payout_map={
-            26: 35.0,    # Straight up pays 35:1
-            0: 17.0, 3: 17.0,      # Splits pay 17:1
-            12: 17.0, 15: 17.0,
-            32: 17.0, 35: 17.0
+            "straight_up": [(26, 1)],  # (number, chips)
+            "splits": [([0, 3], 1), ([12, 15], 1), ([32, 35], 1)]  # (numbers, chips)
         }
     ),
     
@@ -130,14 +124,8 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=4,
         numbers_covered=[0, 3, 12, 15, 26, 32, 35],
         bet_structure={
-            "straight_up": [26],
-            "splits": [[0, 3], [12, 15], [32, 35]]
-        },
-        payout_map={
-            26: 35.0,
-            0: 17.0, 3: 17.0,
-            12: 17.0, 15: 17.0,
-            32: 17.0, 35: 17.0
+            "straight_up": [(26, 1)],
+            "splits": [([0, 3], 1), ([12, 15], 1), ([32, 35], 1)]
         }
     ),
     
@@ -147,15 +135,8 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=4,
         numbers_covered=[0, 3, 12, 15, 19, 26, 32, 35],
         bet_structure={
-            "straight_up": [26],
-            "splits": [[0, 3], [12, 15], [32, 35], [19, 22]]  # Custom client-defined
-        },
-        payout_map={
-            26: 35.0,
-            0: 17.0, 3: 17.0,
-            12: 17.0, 15: 17.0,
-            19: 17.0, 22: 17.0,
-            32: 17.0, 35: 17.0
+            "straight_up": [(26, 1)],
+            "splits": [([0, 3], 1), ([12, 15], 1), ([32, 35], 1), ([19, 22], 1)]
         }
     ),
     
@@ -165,15 +146,7 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=6,
         numbers_covered=[5, 8, 10, 11, 13, 16, 23, 24, 27, 30, 33, 36],
         bet_structure={
-            "splits": [[5, 8], [10, 11], [13, 16], [23, 24], [27, 30], [33, 36]]
-        },
-        payout_map={
-            5: 17.0, 8: 17.0,
-            10: 17.0, 11: 17.0,
-            13: 17.0, 16: 17.0,
-            23: 17.0, 24: 17.0,
-            27: 17.0, 30: 17.0,
-            33: 17.0, 36: 17.0
+            "splits": [([5, 8], 1), ([10, 11], 1), ([13, 16], 1), ([23, 24], 1), ([27, 30], 1), ([33, 36], 1)]
         }
     ),
     
@@ -183,15 +156,8 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=5,
         numbers_covered=[1, 6, 9, 14, 17, 20, 31, 34],
         bet_structure={
-            "straight_up": [1],
-            "splits": [[6, 9], [14, 17], [17, 20], [31, 34]]
-        },
-        payout_map={
-            1: 35.0,     # Straight up
-            6: 17.0, 9: 17.0,
-            14: 17.0, 17: 17.0,
-            20: 17.0,
-            31: 17.0, 34: 17.0
+            "straight_up": [(1, 1)],
+            "splits": [([6, 9], 1), ([14, 17], 1), ([17, 20], 1), ([31, 34], 1)]
         }
     ),
     
@@ -201,11 +167,7 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=8,
         numbers_covered=[1, 6, 9, 14, 17, 20, 31, 34],
         bet_structure={
-            "straight_up": [1, 6, 9, 14, 17, 20, 31, 34]
-        },
-        payout_map={
-            1: 35.0, 6: 35.0, 9: 35.0, 14: 35.0,
-            17: 35.0, 20: 35.0, 31: 35.0, 34: 35.0
+            "straight_up": [(1, 1), (6, 1), (9, 1), (14, 1), (17, 1), (20, 1), (31, 1), (34, 1)]
         }
     ),
     
@@ -215,16 +177,9 @@ SPICE_PATTERNS: Dict[str, SpicePattern] = {
         unit_cost=9,
         numbers_covered=[0, 2, 3, 4, 7, 12, 15, 18, 19, 21, 22, 25, 26, 28, 29, 32, 35],
         bet_structure={
-            "trio": [[0, 2, 3]],  # 2 chips
-            "corners": [[4, 7, 12, 15], [18, 19, 21, 22], [25, 26, 28, 29]],  # 3 chips
-            "splits": [[4, 7], [12, 15], [32, 35]]  # 3 chips
-        },
-        payout_map={
-            0: 11.0, 2: 11.0, 3: 11.0,  # Trio pays 11:1 (split across 2 chips)
-            4: 8.0, 7: 8.0, 12: 8.0, 15: 8.0,  # Corner pays 8:1
-            18: 8.0, 19: 8.0, 21: 8.0, 22: 8.0,
-            25: 8.0, 26: 8.0, 28: 8.0, 29: 8.0,
-            32: 17.0, 35: 17.0  # Splits pay 17:1
+            "trio": [([0, 2, 3], 2)],  # 2 chips on trio
+            "corners": [([25, 26, 28, 29], 2)],  # 2 chips on corner
+            "splits": [([4, 7], 1), ([12, 15], 1), ([18, 21], 1), ([19, 22], 1), ([32, 35], 1)]  # 1 chip each
         }
     ),
 }
@@ -493,6 +448,13 @@ class SpiceEngine:
         """
         Calculate payout for a spice bet given the winning number.
         
+        CRITICAL: Correctly handles:
+        1. Overlapping coverage (e.g., Orphelins #17 covered by 2 splits)
+        2. Multi-chip bets (e.g., Voisins trio uses 2 chips)
+        3. NO la partage on inside bets (2.70% edge, not 1.35%)
+        
+        Each winning chip pays out independently.
+        
         Args:
             spice_type: The spice that was fired
             number: The winning roulette number (0-36)
@@ -504,17 +466,52 @@ class SpiceEngine:
         spice = self.spice_config[spice_type]
         pattern = SPICE_PATTERNS[spice.pattern_id]
         
-        # Calculate cost (apply unit ratio for hybrid mode)
+        # Calculate total cost (all chips placed)
         cost = pattern.unit_cost * unit_bet_size * self.unit_ratio
         
-        # Calculate payout
-        payout = 0.0
-        if number in pattern.payout_map:
-            payout_multiplier = pattern.payout_map[number]
-            payout = (unit_bet_size * payout_multiplier) + unit_bet_size
+        # Calculate payout by checking ALL bet placements
+        # CRITICAL: Must handle overlapping coverage and multi-chip bets
+        total_payout = 0.0
+        winning_chips = 0
         
-        net_pnl = payout - cost
-        won = net_pnl > 0
+        bet_structure = pattern.bet_structure
+        chip_size = unit_bet_size * self.unit_ratio
+        
+        # Check straight-ups: (number, chip_count)
+        if "straight_up" in bet_structure:
+            for num, chips in bet_structure["straight_up"]:
+                if num == number:
+                    # Straight up pays 35:1 per chip + stake returned
+                    # Example: 1 chip @ €10 wins → €10×35 + €10 = €360
+                    total_payout += chips * ((chip_size * 35) + chip_size)
+                    winning_chips += chips
+        
+        # Check splits: ([n1, n2], chip_count)
+        if "splits" in bet_structure:
+            for nums, chips in bet_structure["splits"]:
+                if number in nums:
+                    # Split pays 17:1 per chip + stake
+                    total_payout += chips * ((chip_size * 17) + chip_size)
+                    winning_chips += chips
+        
+        # Check corners: ([n1, n2, n3, n4], chip_count)
+        if "corners" in bet_structure:
+            for nums, chips in bet_structure["corners"]:
+                if number in nums:
+                    # Corner pays 8:1 per chip + stake
+                    total_payout += chips * ((chip_size * 8) + chip_size)
+                    winning_chips += chips
+        
+        # Check trio: ([n1, n2, n3], chip_count)
+        if "trio" in bet_structure:
+            for nums, chips in bet_structure["trio"]:
+                if number in nums:
+                    # Trio pays 11:1 per chip + stake
+                    total_payout += chips * ((chip_size * 11) + chip_size)
+                    winning_chips += chips
+        
+        net_pnl = total_payout - cost
+        won = winning_chips > 0
         
         # Update statistics
         if won:
@@ -522,7 +519,7 @@ class SpiceEngine:
         else:
             self.state.spice_losses += 1
         
-        self.state.spice_total_payout += payout
+        self.state.spice_total_payout += total_payout
         
         return net_pnl, won
     
