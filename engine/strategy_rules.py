@@ -139,6 +139,10 @@ class StrategyOverrides:
     doctrine_roulette_ti: float = 0.5
     doctrine_roulette_co: float = 0.0
     
+    # --- RECOVERY SESSION SYSTEM ---
+    recovery_enabled: bool = False
+    recovery_stop_loss: int = 10
+    
     # --- TAX ---
     tax_threshold: float = 12500.0
     tax_rate: float = 25.0

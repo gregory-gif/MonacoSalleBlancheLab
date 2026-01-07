@@ -55,8 +55,7 @@ class RouletteWorker:
         state.spice_engine = spice_engine
         state.session_start_bankroll = current_ga
         state.current_spin = 1
-        # Use the number of spins as shown in the UI label (shoes * 60)
-        spins_limit = int(float(overrides.shoes_per_session) * 60)
+        spins_limit = overrides.shoes_per_session * 60 
         volume = 0
         
         # Smart Trailing Stop tracking
@@ -336,7 +335,7 @@ class RouletteWorker:
                 sessions_this_month = sessions_per_year // 12
                 if m % 12 < (sessions_per_year % 12): sessions_this_month += 1
 
-                for _ in range(sessions_this_month):
+                for sess_idx in range(sessions_this_month):
                     pnl, vol, used_level, spins, spice_stats, exit_reason, max_caroline, max_dalembert, final_streak, peak_profit = RouletteWorker.run_session(
                         current_ga, overrides, tier_map, use_ratchet, 
                         False, active_level, strategy_mode, base_bet_val
@@ -384,8 +383,160 @@ class RouletteWorker:
                             'caroline_max': max_caroline,
                             'dalembert_max': max_dalembert,
                             'streak_max': final_streak,
-                            'peak_profit': peak_profit
+                            'peak_profit': peak_profit,
+                            'is_recovery': False
                         })
+                    
+                    # === RECOVERY SESSION SYSTEM ===
+                    # If session was negative and recovery is enabled, play a recovery "bis" session
+                    if overrides.recovery_enabled and pnl < 0 and current_ga >= insolvency_floor:
+                        # Create modified overrides with recovery stop loss
+                        recovery_overrides = StrategyOverrides(
+                            iron_gate_limit=overrides.iron_gate_limit,
+                            stop_loss_units=overrides.recovery_stop_loss,  # Use recovery stop loss
+                            profit_lock_units=overrides.profit_lock_units,
+                            press_trigger_wins=overrides.press_trigger_wins,
+                            press_depth=overrides.press_depth,
+                            ratchet_lock_pct=overrides.ratchet_lock_pct,
+                            tax_threshold=overrides.tax_threshold,
+                            tax_rate=overrides.tax_rate,
+                            bet_strategy=overrides.bet_strategy,
+                            bet_strategy_2=overrides.bet_strategy_2,
+                            shoes_per_session=overrides.shoes_per_session,
+                            penalty_box_enabled=overrides.penalty_box_enabled,
+                            ratchet_enabled=overrides.ratchet_enabled,
+                            ratchet_mode=overrides.ratchet_mode,
+                            smart_exit_enabled=overrides.smart_exit_enabled,
+                            smart_window_start=overrides.smart_window_start,
+                            min_profit_to_lock=overrides.min_profit_to_lock,
+                            trailing_drop_pct=overrides.trailing_drop_pct,
+                            # Copy all spice settings
+                            spice_global_max_per_session=overrides.spice_global_max_per_session,
+                            spice_global_max_per_spin=overrides.spice_global_max_per_spin,
+                            spice_disable_if_caroline_step4=overrides.spice_disable_if_caroline_step4,
+                            spice_disable_if_pl_below_zero=overrides.spice_disable_if_pl_below_zero,
+                            spice_unit_ratio=overrides.spice_unit_ratio,
+                            spice_zero_leger_enabled=overrides.spice_zero_leger_enabled,
+                            spice_zero_leger_trigger=overrides.spice_zero_leger_trigger,
+                            spice_zero_leger_max=overrides.spice_zero_leger_max,
+                            spice_zero_leger_cooldown=overrides.spice_zero_leger_cooldown,
+                            spice_zero_leger_min_pl=overrides.spice_zero_leger_min_pl,
+                            spice_zero_leger_max_pl=overrides.spice_zero_leger_max_pl,
+                            spice_jeu_zero_enabled=overrides.spice_jeu_zero_enabled,
+                            spice_jeu_zero_trigger=overrides.spice_jeu_zero_trigger,
+                            spice_jeu_zero_max=overrides.spice_jeu_zero_max,
+                            spice_jeu_zero_cooldown=overrides.spice_jeu_zero_cooldown,
+                            spice_jeu_zero_min_pl=overrides.spice_jeu_zero_min_pl,
+                            spice_jeu_zero_max_pl=overrides.spice_jeu_zero_max_pl,
+                            spice_zero_crown_enabled=overrides.spice_zero_crown_enabled,
+                            spice_zero_crown_trigger=overrides.spice_zero_crown_trigger,
+                            spice_zero_crown_max=overrides.spice_zero_crown_max,
+                            spice_zero_crown_cooldown=overrides.spice_zero_crown_cooldown,
+                            spice_zero_crown_min_pl=overrides.spice_zero_crown_min_pl,
+                            spice_zero_crown_max_pl=overrides.spice_zero_crown_max_pl,
+                            spice_tiers_enabled=overrides.spice_tiers_enabled,
+                            spice_tiers_trigger=overrides.spice_tiers_trigger,
+                            spice_tiers_max=overrides.spice_tiers_max,
+                            spice_tiers_cooldown=overrides.spice_tiers_cooldown,
+                            spice_tiers_min_pl=overrides.spice_tiers_min_pl,
+                            spice_tiers_max_pl=overrides.spice_tiers_max_pl,
+                            spice_orphelins_enabled=overrides.spice_orphelins_enabled,
+                            spice_orphelins_trigger=overrides.spice_orphelins_trigger,
+                            spice_orphelins_max=overrides.spice_orphelins_max,
+                            spice_orphelins_cooldown=overrides.spice_orphelins_cooldown,
+                            spice_orphelins_min_pl=overrides.spice_orphelins_min_pl,
+                            spice_orphelins_max_pl=overrides.spice_orphelins_max_pl,
+                            spice_orphelins_plein_enabled=overrides.spice_orphelins_plein_enabled,
+                            spice_orphelins_plein_trigger=overrides.spice_orphelins_plein_trigger,
+                            spice_orphelins_plein_max=overrides.spice_orphelins_plein_max,
+                            spice_orphelins_plein_cooldown=overrides.spice_orphelins_plein_cooldown,
+                            spice_orphelins_plein_min_pl=overrides.spice_orphelins_plein_min_pl,
+                            spice_orphelins_plein_max_pl=overrides.spice_orphelins_plein_max_pl,
+                            spice_voisins_enabled=overrides.spice_voisins_enabled,
+                            spice_voisins_trigger=overrides.spice_voisins_trigger,
+                            spice_voisins_max=overrides.spice_voisins_max,
+                            spice_voisins_cooldown=overrides.spice_voisins_cooldown,
+                            spice_voisins_min_pl=overrides.spice_voisins_min_pl,
+                            spice_voisins_max_pl=overrides.spice_voisins_max_pl,
+                            # Copy doctrine settings
+                            doctrine_enabled=overrides.doctrine_enabled,
+                            doctrine_pl_stop=overrides.doctrine_pl_stop,
+                            doctrine_pl_target=overrides.doctrine_pl_target,
+                            doctrine_pl_press_wins=overrides.doctrine_pl_press_wins,
+                            doctrine_pl_press_depth=overrides.doctrine_pl_press_depth,
+                            doctrine_pl_iron=overrides.doctrine_pl_iron,
+                            doctrine_ti_stop=overrides.doctrine_ti_stop,
+                            doctrine_ti_target=overrides.doctrine_ti_target,
+                            doctrine_ti_press_wins=overrides.doctrine_ti_press_wins,
+                            doctrine_ti_press_depth=overrides.doctrine_ti_press_depth,
+                            doctrine_ti_iron=overrides.doctrine_ti_iron,
+                            doctrine_loss_trigger=overrides.doctrine_loss_trigger,
+                            doctrine_dd_pct_trigger=overrides.doctrine_dd_pct_trigger,
+                            doctrine_dd_eur_trigger=overrides.doctrine_dd_eur_trigger,
+                            doctrine_tight_min=overrides.doctrine_tight_min,
+                            doctrine_tight_max=overrides.doctrine_tight_max,
+                            doctrine_cooloff_enabled=overrides.doctrine_cooloff_enabled,
+                            doctrine_cooloff_floor=overrides.doctrine_cooloff_floor,
+                            doctrine_cooloff_min_months=overrides.doctrine_cooloff_min_months,
+                            doctrine_cooloff_recovery_pct=overrides.doctrine_cooloff_recovery_pct,
+                            doctrine_link_roulette=overrides.doctrine_link_roulette,
+                            doctrine_roulette_pl=overrides.doctrine_roulette_pl,
+                            doctrine_roulette_ti=overrides.doctrine_roulette_ti,
+                            doctrine_roulette_co=overrides.doctrine_roulette_co,
+                            recovery_enabled=False,  # Prevent recursive recovery sessions
+                            recovery_stop_loss=overrides.recovery_stop_loss
+                        )
+                        
+                        # Play recovery session
+                        rec_pnl, rec_vol, rec_level, rec_spins, rec_spice_stats, rec_exit, rec_caroline, rec_dalembert, rec_streak, rec_peak = RouletteWorker.run_session(
+                            current_ga, recovery_overrides, tier_map, use_ratchet,
+                            False, active_level, strategy_mode, base_bet_val
+                        )
+                        active_level = rec_level
+                        current_ga += rec_pnl
+                        running_play_pnl += rec_pnl
+                        current_year_points += rec_vol * (earn_rate / 100)
+                        last_session_won = (rec_pnl > 0)
+                        
+                        # Aggregate recovery session spice statistics
+                        all_spice_stats['total_spices_used'] += rec_spice_stats['total_spices_used']
+                        all_spice_stats['spice_wins'] += rec_spice_stats['spice_wins']
+                        all_spice_stats['spice_losses'] += rec_spice_stats['spice_losses']
+                        all_spice_stats['total_cost'] += rec_spice_stats['total_cost']
+                        all_spice_stats['total_payout'] += rec_spice_stats['total_payout']
+                        all_spice_stats['momentum_tp_gains'] += rec_spice_stats['momentum_tp_gains']
+                        
+                        for spice_name, count in rec_spice_stats['distribution'].items():
+                            all_spice_stats['distribution'][spice_name] += count
+                        
+                        if rec_spice_stats['total_spices_used'] > 0:
+                            all_spice_stats['sessions_with_spices'] += 1
+                        
+                        # Track recovery session in Y1 log with "bis" marker
+                        if track_y1_details and m < 12:
+                            y1_session_counter += 1
+                            rec_spice_net = rec_spice_stats['total_payout'] - rec_spice_stats['total_cost']
+                            rec_tp_boosts = int(rec_spice_stats['momentum_tp_gains'] / (20 * base_bet_val)) if rec_spice_stats['momentum_tp_gains'] > 0 else 0
+                            
+                            y1_log.append({
+                                'month': m + 1,
+                                'session': y1_session_counter,
+                                'result': rec_pnl,
+                                'balance': current_ga,
+                                'game_bal': start_ga + running_play_pnl,
+                                'spins': rec_spins,
+                                'volume': rec_vol,
+                                'tier': rec_level,
+                                'exit': rec_exit,
+                                'spice_cnt': rec_spice_stats['total_spices_used'],
+                                'spice_pl': rec_spice_net,
+                                'tp_boosts': rec_tp_boosts,
+                                'caroline_max': rec_caroline,
+                                'dalembert_max': rec_dalembert,
+                                'streak_max': rec_streak,
+                                'peak_profit': rec_peak,
+                                'is_recovery': True  # Mark as recovery session
+                            })
             else:
                  if track_y1_details and m < 12:
                         y1_log.append({
@@ -577,7 +728,11 @@ def show_roulette_sim():
                 'doctrine_cooloff_months': slider_doctrine_cooloff_months.value, 'doctrine_recovery_pct': slider_doctrine_recovery_pct.value,
                 'doctrine_link_roulette': switch_doctrine_link_roulette.value,
                 'doctrine_roulette_pl': slider_doctrine_roulette_pl.value, 'doctrine_roulette_ti': slider_doctrine_roulette_ti.value,
-                'doctrine_roulette_co': slider_doctrine_roulette_co.value
+                'doctrine_roulette_co': slider_doctrine_roulette_co.value,
+                
+                # RECOVERY SESSION FIELDS
+                'recovery_enabled': switch_recovery_enabled.value,
+                'recovery_stop_loss': slider_recovery_stop_loss.value
             }
             profile['saved_strategies'][name] = config
             save_profile(profile)
@@ -723,6 +878,10 @@ def show_roulette_sim():
             slider_doctrine_roulette_ti.value = config.get('doctrine_roulette_ti', 0.5)
             slider_doctrine_roulette_co.value = config.get('doctrine_roulette_co', 0.0)
             
+            # RECOVERY SESSION LOADS
+            switch_recovery_enabled.value = config.get('recovery_enabled', False)
+            slider_recovery_stop_loss.value = config.get('recovery_stop_loss', 10)
+            
             ui.notify(f'Loaded: {name}', type='info')
         except: pass
 
@@ -846,7 +1005,7 @@ def show_roulette_sim():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
                 bet_strategy_2=select_bet_strat_2.value,
-                shoes_per_session=slider_shoes.value, penalty_box_enabled=switch_penalty.value,
+                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
                 # Smart Trailing Stop
@@ -940,6 +1099,10 @@ def show_roulette_sim():
                 doctrine_roulette_pl=float(slider_doctrine_roulette_pl.value),
                 doctrine_roulette_ti=float(slider_doctrine_roulette_ti.value),
                 doctrine_roulette_co=float(slider_doctrine_roulette_co.value),
+                
+                # === RECOVERY SESSION SYSTEM ===
+                recovery_enabled=switch_recovery_enabled.value,
+                recovery_stop_loss=int(slider_recovery_stop_loss.value),
             )
 
             start_ga = config['start_ga']
@@ -1062,8 +1225,36 @@ def show_roulette_sim():
                     table_rows = []
                     for entry in y1_log:
                         res_val = entry.get('result', 0)
-                        table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('spins', 0)}" })
-                    ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
+                        session_num = entry.get('session', 0)
+                        is_recovery = entry.get('is_recovery', False)
+                        
+                        # Format session label with "bis" indicator for recovery sessions
+                        if is_recovery:
+                            # Find the original session number (the one before this recovery)
+                            session_label = f"S{session_num} bis"
+                        else:
+                            session_label = f"S{session_num}"
+                        
+                        table_rows.append({
+                            'Month': f"M{entry.get('month', '?')}", 
+                            'Session': session_label,
+                            'Result': f"€{res_val:+,.0f}", 
+                            'Balance': f"€{entry.get('balance', 0):,.0f}", 
+                            'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 
+                            'Spins': f"{entry.get('spins', 0)}"
+                        })
+                    ui.aggrid({
+                        'columnDefs': [
+                            {'headerName': 'Mo', 'field': 'Month', 'width': 60}, 
+                            {'headerName': 'Sess', 'field': 'Session', 'width': 80}, 
+                            {'headerName': 'PnL', 'field': 'Result', 'width': 90}, 
+                            {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, 
+                            {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, 
+                            {'headerName': 'Spins', 'field': 'Spins', 'width': 80}
+                        ], 
+                        'rowData': table_rows, 
+                        'domLayout': 'autoHeight'
+                    }).classes('w-full theme-balham-dark')
 
         with report_container:
             report_container.clear()
@@ -1089,6 +1280,13 @@ def show_roulette_sim():
                 lines.append(f"Stop Loss: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
                 lines.append(f"Smart Trailing Stop: {overrides.smart_exit_enabled} (Window: Spin {overrides.smart_window_start}, Min Lock: {overrides.min_profit_to_lock}u, Drop: {overrides.trailing_drop_pct*100:.0f}%)")
                 lines.append(f"Ratchet: {overrides.ratchet_enabled} ({overrides.ratchet_mode})")
+                
+                # Recovery Session System
+                if overrides.recovery_enabled:
+                    lines.append(f"Recovery Sessions: ENABLED (Stop Loss: {overrides.recovery_stop_loss}u)")
+                else:
+                    lines.append(f"Recovery Sessions: DISABLED")
+                
                 lines.append(f"Gold Probability: {gold_prob:.1f}%")
                 
                 # Doctrine Engine Configuration
@@ -1158,7 +1356,7 @@ def show_roulette_sim():
                 tax_rate=slider_tax_rate.value, tax_threshold=int(slider_tax_thresh.value),
                 stop_loss_units=int(slider_stop_loss.value), profit_lock_units=int(slider_profit.value),
                 press_trigger_wins=int(select_press.value), press_depth=int(slider_press_depth.value),
-                iron_gate_limit=int(slider_iron_gate.value), shoes_per_session=slider_shoes.value,
+                iron_gate_limit=int(slider_iron_gate.value), shoes_per_session=int(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value, ratchet_enabled=switch_ratchet.value,
                 ratchet_mode=select_ratchet_mode.value,
                 smart_exit_enabled=switch_smart_exit.value,
@@ -1467,6 +1665,24 @@ def show_roulette_sim():
                             slider_spice_voisins_max_pl = ui.slider(min=50, max=300, value=100, step=10).props('color=yellow'); lbl_v_max_pl.bind_text_from(slider_spice_voisins_max_pl, 'value', lambda v: f'+{int(v)}u')
 
             ui.separator().classes('bg-slate-700')
+            
+            # === RECOVERY SESSION CONTROLS ===
+            with ui.card().classes('w-full bg-slate-800 p-4 border-2 border-cyan-500 mb-4'):
+                ui.label('🔄 RECOVERY SESSION SYSTEM').classes('font-bold text-cyan-400 text-lg mb-2')
+                ui.label('Automatically play a recovery session after any losing session').classes('text-xs text-slate-400 mb-3')
+                
+                switch_recovery_enabled = ui.switch('Enable Recovery Sessions').props('color=cyan')
+                switch_recovery_enabled.value = False
+                
+                with ui.row().classes('w-full justify-between items-center mt-2'):
+                    ui.label('Recovery Stop Loss (units)').classes('text-xs text-cyan-300')
+                    lbl_recovery_sl = ui.label()
+                slider_recovery_stop_loss = ui.slider(min=5, max=50, value=10, step=1).props('color=cyan')
+                lbl_recovery_sl.bind_text_from(slider_recovery_stop_loss, 'value', lambda v: f'{int(v)}u')
+                
+                ui.label('💡 When enabled: If a session ends negative, a "bis" recovery session is automatically played with its own stop loss.').classes('text-xs text-yellow-400 italic mt-2')
+
+            ui.separator().classes('bg-slate-700')
 
             with ui.grid(columns=2).classes('w-full gap-8'):
                 with ui.column():
@@ -1505,13 +1721,13 @@ def show_roulette_sim():
                     
                     # Smart Trailing Stop Controls
                     ui.separator().classes('bg-slate-700 my-2')
-                    ui.label('🎯 SMART TRAILING STOP (1+ spins)').classes('text-xs text-yellow-400 font-bold')
+                    ui.label('🎯 SMART TRAILING STOP (45+ spins)').classes('text-xs text-yellow-400 font-bold')
                     switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
                     switch_smart_exit.value = True
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Start Window').classes('text-xs text-slate-400')
                         lbl_smart_window = ui.label()
-                    slider_smart_window = ui.slider(min=1, max=120, value=45, step=1).props('color=yellow')
+                    slider_smart_window = ui.slider(min=45, max=120, value=90, step=5).props('color=yellow')
                     lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Spin {int(v)}')
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
