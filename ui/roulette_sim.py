@@ -936,7 +936,7 @@ def show_roulette_sim():
                 press_depth=int(slider_press_depth.value), ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
                 bet_strategy_2=select_bet_strat_2.value,
-                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
+                shoes_per_session=float(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
                 # Smart Trailing Stop
@@ -1005,7 +1005,7 @@ def show_roulette_sim():
                 press_depth=config['press_depth'], ratchet_lock_pct=0.0, tax_threshold=config['tax_thresh'],
                 tax_rate=config['tax_rate'], bet_strategy=select_bet_strat.value,
                 bet_strategy_2=select_bet_strat_2.value,
-                shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
+                shoes_per_session=float(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 
                 # Smart Trailing Stop
@@ -1356,7 +1356,7 @@ def show_roulette_sim():
                 tax_rate=slider_tax_rate.value, tax_threshold=int(slider_tax_thresh.value),
                 stop_loss_units=int(slider_stop_loss.value), profit_lock_units=int(slider_profit.value),
                 press_trigger_wins=int(select_press.value), press_depth=int(slider_press_depth.value),
-                iron_gate_limit=int(slider_iron_gate.value), shoes_per_session=int(slider_shoes.value),
+                iron_gate_limit=int(slider_iron_gate.value), shoes_per_session=float(slider_shoes.value),
                 penalty_box_enabled=switch_penalty.value, ratchet_enabled=switch_ratchet.value,
                 ratchet_mode=select_ratchet_mode.value,
                 smart_exit_enabled=switch_smart_exit.value,

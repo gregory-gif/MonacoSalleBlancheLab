@@ -29,7 +29,7 @@ class StrategyOverrides:
     bet_strategy_2: str = None 
     
     # --- SESSION ---
-    shoes_per_session: int = 3
+    shoes_per_session: float = 3.0
     penalty_box_enabled: bool = True
     
     # --- BACCARAT TIE BETTING ---
