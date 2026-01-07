@@ -1504,13 +1504,13 @@ def show_roulette_sim():
                     
                     # Smart Trailing Stop Controls
                     ui.separator().classes('bg-slate-700 my-2')
-                    ui.label('🎯 SMART TRAILING STOP (45+ spins)').classes('text-xs text-yellow-400 font-bold')
+                    ui.label('🎯 SMART TRAILING STOP (1+ spins)').classes('text-xs text-yellow-400 font-bold')
                     switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
                     switch_smart_exit.value = True
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Start Window').classes('text-xs text-slate-400')
                         lbl_smart_window = ui.label()
-                    slider_smart_window = ui.slider(min=45, max=120, value=90, step=5).props('color=yellow')
+                    slider_smart_window = ui.slider(min=1, max=120, value=45, step=1).props('color=yellow')
                     lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Spin {int(v)}')
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
