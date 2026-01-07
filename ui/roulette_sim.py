@@ -55,7 +55,8 @@ class RouletteWorker:
         state.spice_engine = spice_engine
         state.session_start_bankroll = current_ga
         state.current_spin = 1
-        spins_limit = overrides.shoes_per_session * 60 
+        # Use the direct number of spins from the main gameplay slider
+        spins_limit = int(overrides.shoes_per_session)
         volume = 0
         
         # Smart Trailing Stop tracking
