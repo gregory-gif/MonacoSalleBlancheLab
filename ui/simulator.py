@@ -794,10 +794,14 @@ def show_simulator():
 
         with report_container:
             report_container.clear()
+            # Progression mapping
+            press_map = {0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert", 5: "La Caroline"}
+            press_name = press_map.get(select_press.value, f"Unknown ({select_press.value})")
+            
             lines = ["=== BACCARAT CONFIGURATION ==="]
             lines.append(f"Sims: {config['num_sims']} | Years: {config['years']} | Mode: {config['strategy_mode']}")
             lines.append(f"Betting: {overrides.bet_strategy.name} | Base Bet: €{config['base_bet']} | Shoes: {overrides.shoes_per_session}")
-            lines.append(f"Press: {select_press.value} (Wins: {overrides.press_trigger_wins}) | Depth: {overrides.press_depth}")
+            lines.append(f"Progression: {press_name} | Trigger Wins: {overrides.press_trigger_wins} | Depth: {overrides.press_depth}")
             lines.append(f"Iron Gate: {overrides.iron_gate_limit} | Stop: {overrides.stop_loss_units}u | Target: {overrides.profit_lock_units}u")
             ratchet_status = f"{overrides.ratchet_mode}" if overrides.ratchet_enabled else "OFF"
             lines.append(f"Ratchet: {ratchet_status} | Tie Betting: {'ON' if overrides.tie_bet_enabled else 'OFF'} | Penalty Box: {'ON' if overrides.penalty_box_enabled else 'OFF'}")
@@ -891,7 +895,7 @@ def show_simulator():
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
                     with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
-                    slider_base_bet = ui.slider(min=5, max=100, step=5, value=10, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
+                    slider_base_bet = ui.slider(min=5, max=500, step=100, value=10, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
                     
                     with ui.row().classes('w-full justify-between'): ui.label('Safety Buffer').classes('text-xs text-orange-400'); lbl_safe = ui.label()
                     slider_safety = ui.slider(min=10, max=60, value=25, on_change=update_ladder_preview).props('color=orange'); lbl_safe.bind_text_from(slider_safety, 'value', lambda v: f'{v}x')
