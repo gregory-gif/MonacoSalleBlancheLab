@@ -803,29 +803,32 @@ def show_simulator():
                         table_rows.append({'Month': f"M{entry.get('month', '?')}", 'Result': f"€{res_val:+,.0f}", 'Balance': f"€{entry.get('balance', 0):,.0f}", 'Game Bal': f"€{entry.get('game_bal', 0):,.0f}", 'Hands': f"{entry.get('hands', 0)}" })
                     ui.aggrid({'columnDefs': [{'headerName': 'Mo', 'field': 'Month', 'width': 60}, {'headerName': 'PnL', 'field': 'Result', 'width': 90}, {'headerName': 'Tot. Bal', 'field': 'Balance', 'width': 100}, {'headerName': 'Game Bal', 'field': 'Game Bal', 'width': 100}, {'headerName': 'Spins', 'field': 'Hands', 'width': 80}], 'rowData': table_rows, 'domLayout': 'autoHeight'}).classes('w-full theme-balham-dark')
 
-        # --- CSV EXPORT FOR AI ANALYSIS ---
-        with ui.card().classes('w-full bg-slate-900 p-4 mb-4'):
-            ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
-            ui.label('Simulation settings and results for all sessions.').classes('text-xs text-slate-500 mb-2')
 
-            # CSV header
-            csv_lines = []
-            csv_lines.append('Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Tie_Count,Tie_Bets,Tie_PL,Press_Logic,Press_Wins,Press_Depth,Iron_Gate,Stop_Loss,Target,Base_Bet,Bet_Strategy,Doctrine,Smart_Exit,Tie_Betting')
-            # Add each session result
-            for e in y1_log:
-                csv_lines.append(
-                    f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
-                    f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']},"
-                    f"{e.get('tie_count', 0)},{e.get('tie_bets', 0)},{e.get('tie_pnl', 0):.0f},"
-                    f"{select_press.value},{overrides.press_trigger_wins},{slider_press_depth.value},{overrides.iron_gate_limit},{overrides.stop_loss_units},{overrides.profit_lock_units},{config['base_bet']},{overrides.bet_strategy.name},"
-                    f"{'ENABLED' if overrides.doctrine_enabled else 'DISABLED'},{'ENABLED' if switch_smart_exit.value else 'DISABLED'},{'ENABLED' if switch_tie_bet.value else 'DISABLED'}"
-                )
-            csv_text = '\n'.join(csv_lines)
-            csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
-            def copy_csv():
-                ui.run_javascript(f'navigator.clipboard.writeText(`{csv_text}`)')
-                ui.notify('CSV copied to clipboard!', type='positive')
-            ui.button('COPY CSV', on_click=copy_csv).props('icon=content_copy color=yellow').classes('w-full mt-2')
+        # --- CSV EXPORT FOR AI ANALYSIS ---
+        csv_export_container.clear()
+        with csv_export_container:
+            with ui.card().classes('w-full bg-slate-900 p-4 mb-4'):
+                ui.label('📋 CSV EXPORT FOR AI ANALYSIS').classes('text-sm font-bold text-yellow-400 mb-2')
+                ui.label('Simulation settings and results for all sessions.').classes('text-xs text-slate-500 mb-2')
+
+                # CSV header
+                csv_lines = []
+                csv_lines.append('Month,Session,Result,Total_Bal,Game_Bal,Hands,Volume,Tier,Exit_Reason,Streak_Max,Tie_Count,Tie_Bets,Tie_PL,Press_Logic,Press_Wins,Press_Depth,Iron_Gate,Stop_Loss,Target,Base_Bet,Bet_Strategy,Doctrine,Smart_Exit,Tie_Betting')
+                # Add each session result
+                for e in y1_log:
+                    csv_lines.append(
+                        f"{e['month']},{e['session']},{e['result']:.0f},{e['balance']:.0f},{e['game_bal']:.0f},"
+                        f"{e['hands']},{e['volume']:.0f},{e['tier']},{e['exit']},{e['streak_max']},"
+                        f"{e.get('tie_count', 0)},{e.get('tie_bets', 0)},{e.get('tie_pnl', 0):.0f},"
+                        f"{select_press.value},{overrides.press_trigger_wins},{slider_press_depth.value},{overrides.iron_gate_limit},{overrides.stop_loss_units},{overrides.profit_lock_units},{config['base_bet']},{overrides.bet_strategy.name},"
+                        f"{'ENABLED' if overrides.doctrine_enabled else 'DISABLED'},{'ENABLED' if switch_smart_exit.value else 'DISABLED'},{'ENABLED' if switch_tie_bet.value else 'DISABLED'}"
+                    )
+                csv_text = '\n'.join(csv_lines)
+                csv_area = ui.textarea(value=csv_text).classes('w-full font-mono text-xs').props('rows=10 readonly')
+                def copy_csv():
+                    ui.run_javascript(f'navigator.clipboard.writeText(`{csv_text}`)')
+                    ui.notify('CSV copied to clipboard!', type='positive')
+                ui.button('COPY CSV', on_click=copy_csv).props('icon=content_copy color=yellow').classes('w-full mt-2')
 
         # --- Existing text report below ---
         with report_container:
@@ -1115,14 +1118,13 @@ def show_simulator():
 
         label_stats = ui.label('Ready...').classes('text-sm text-slate-500'); progress = ui.linear_progress().props('color=green').classes('mt-0'); progress.set_visibility(False)
         
+
         scoreboard_container = ui.column().classes('w-full mb-4')
         chart_container = ui.card().classes('w-full bg-slate-900 p-4')
-        
+        csv_export_container = ui.column().classes('w-full')
         ui.button('⚡ REFRESH SINGLE', on_click=refresh_single_universe).props('flat color=cyan dense').classes('mt-4')
         chart_single_container = ui.column().classes('w-full mt-2')
         session_detail_container = ui.column().classes('w-full mt-2')
-        
         flight_recorder_container = ui.column().classes('w-full mb-4')
         report_container = ui.column().classes('w-full')
-        
         update_ladder_preview()
