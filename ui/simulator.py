@@ -38,6 +38,17 @@ class BaccaratWorker:
             session_overrides.ratchet_enabled = True
             session_overrides.profit_lock_units = 1000 if session_overrides.profit_lock_units <= 0 else session_overrides.profit_lock_units
 
+        # Enable custom progressions based on Press Logic dropdown
+        if hasattr(session_overrides, 'profit_closer_enabled'):
+            session_overrides.profit_closer_enabled = False
+        if hasattr(session_overrides, 'fibonacci_enabled'):
+            session_overrides.fibonacci_enabled = False
+        if hasattr(session_overrides, 'press_trigger_wins'):
+            # 6: Profit Closer, 7: Fibonacci
+            if session_overrides.press_trigger_wins == 6:
+                session_overrides.profit_closer_enabled = True
+            elif session_overrides.press_trigger_wins == 7:
+                session_overrides.fibonacci_enabled = True
         state = BaccaratSessionState(tier=tier, overrides=session_overrides)
         state.current_shoe = 1
         volume = 0
@@ -923,7 +934,16 @@ def show_simulator():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert", 5: "La Caroline"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({
+                        0: 'Flat',
+                        1: 'Press 1-Win',
+                        2: 'Press 2-Wins',
+                        3: 'Progression 100-150-250',
+                        4: "Capped D'Alembert",
+                        5: "La Caroline",
+                        6: "Profit Closer 100-200-350",
+                        7: "Fibonacci 100-100-200-300-500"
+                    }, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
