@@ -77,11 +77,32 @@ class BaccaratStrategist:
         # 6. BET SIZING (Progressions)
         bet = base_val
         pm = state.overrides.press_trigger_wins
-        
-        if pm == 3: # Titan
-            if state.current_press_streak == 1: bet = base_val * 1.5
-            elif state.current_press_streak >= 2: bet = base_val * 2.5
-        elif pm > 0: 
+
+        # --- Profit Closer progression: 100-200-350 (units)
+        if getattr(state.overrides, 'profit_closer_enabled', False):
+            # Progression: 1u, 2u, 3.5u, then reset
+            if state.current_press_streak == 0:
+                bet = base_val
+            elif state.current_press_streak == 1:
+                bet = base_val * 2
+            elif state.current_press_streak == 2:
+                bet = base_val * 3.5
+            else:
+                bet = base_val
+        # --- Fibonacci progression: 100-100-200-300-500 (units)
+        elif getattr(state.overrides, 'fibonacci_enabled', False):
+            # Progression: 1u, 1u, 2u, 3u, 5u, then reset
+            fibo = [1, 1, 2, 3, 5]
+            idx = min(state.current_press_streak, len(fibo)-1)
+            bet = base_val * fibo[idx]
+        # --- Titan progression: 100-150-250
+        elif pm == 3:
+            if state.current_press_streak == 1:
+                bet = base_val * 1.5
+            elif state.current_press_streak >= 2:
+                bet = base_val * 2.5
+        # --- Generic press logic
+        elif pm > 0:
             if state.current_press_streak >= pm:
                 steps = min(state.current_press_streak, state.overrides.press_depth)
                 bet = base_val + (steps * state.tier.press_unit)
