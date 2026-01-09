@@ -38,9 +38,6 @@ class StrategyOverrides:
     # --- SMART TRAILING STOP ---
     smart_exit_enabled: bool = True
     smart_window_start: int = 90
-    # --- CUSTOM PROGRESSIONS ---
-    profit_closer_enabled: bool = False
-    fibonacci_enabled: bool = False
     min_profit_to_lock: int = 20
     trailing_drop_pct: float = 0.20
     
