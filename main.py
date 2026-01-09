@@ -92,4 +92,12 @@ def main_page():
 # 3. RUN
 # ==============================================================================
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title='Salle Blanche Lab', port=8080, reload=True, favicon='♠️', show=True, storage_secret='monaco_vault_key')
+    ui.run(
+        title='Salle Blanche Lab', 
+        port=8080, 
+        reload=False,  # Disable auto-reload to prevent connection drops
+        favicon='♠️', 
+        show=True, 
+        storage_secret='monaco_vault_key',
+        reconnect_timeout=30.0  # Keep connection alive for 30 seconds
+    )
