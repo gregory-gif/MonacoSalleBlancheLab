@@ -921,7 +921,7 @@ def show_simulator():
                     select_engine_mode = ui.select(['Standard', 'Fortress', 'Titan', 'Safe Titan'], value='Standard', label='Betting Engine').classes('w-full').on_value_change(update_ladder_preview)
                     
                     with ui.row().classes('w-full justify-between'): ui.label('Base Bet (€)').classes('text-xs text-purple-300'); lbl_base = ui.label()
-                    slider_base_bet = ui.slider(min=5, max=100, step=5, value=10, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
+                    slider_base_bet = ui.slider(min=5, max=1000, step=5, value=10, on_change=update_ladder_preview).props('color=purple'); lbl_base.bind_text_from(slider_base_bet, 'value', lambda v: f'€{v}')
                     
                     with ui.row().classes('w-full justify-between'): ui.label('Safety Buffer').classes('text-xs text-orange-400'); lbl_safe = ui.label()
                     slider_safety = ui.slider(min=10, max=60, value=25, on_change=update_ladder_preview).props('color=orange'); lbl_safe.bind_text_from(slider_safety, 'value', lambda v: f'{v}x')
