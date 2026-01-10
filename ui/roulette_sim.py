@@ -75,8 +75,8 @@ class RouletteWorker:
             b2 = BET_MAP.get(overrides.bet_strategy_2)
             active_main_bets.append(b2)
         
-        # For Negatif Snap-Back, The Gentle Surgeon, and Winner's Guard: track individual bet results
-        use_snapback_halt = (session_overrides.press_trigger_wins in [7, 8, 9] and len(active_main_bets) == 2)
+        # For Negatif Snap-Back, The Gentle Surgeon, and profit guard variants: track individual bet results
+        use_snapback_halt = (session_overrides.press_trigger_wins in [7, 8, 9, 10] and len(active_main_bets) == 2)
         
         while state.current_spin <= spins_limit and state.mode != 'STOPPED':
             decision = RouletteStrategist.get_next_decision(state)
@@ -140,6 +140,10 @@ class RouletteWorker:
                     # Dynamic max level based on profit
                     max_level = 2 if state.session_pnl > 0 else 3
                     level_attr = 'winners_guard_level'
+                elif prog_type == 10:  # Negatif Profit Guard
+                    # Dynamic max level based on profit
+                    max_level = 2 if state.session_pnl > 0 else 3
+                    level_attr = 'negatif_profit_guard_level'
                 
                 # Update progression state based on individual results
                 if state.bet_in_progression == -1:
@@ -1273,7 +1277,8 @@ def show_roulette_sim():
                     6: "Negative Caroline",
                     7: "Negatif 1-2-4-7 Snap-Back",
                     8: "The Gentle Surgeon (1-2-4)",
-                    9: "Winner's Guard (1-1-2-4)"
+                    9: "Winner's Guard (1-1-2-4)",
+                    10: "Negatif Profit Guard (1-2-4)"
                 }
                 press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
 
@@ -1749,7 +1754,7 @@ def show_roulette_sim():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back", 8: "The Gentle Surgeon (1-2-4)", 9: "Winner's Guard (1-1-2-4)"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back", 8: "The Gentle Surgeon (1-2-4)", 9: "Winner's Guard (1-1-2-4)", 10: "Negatif Profit Guard (1-2-4)"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
