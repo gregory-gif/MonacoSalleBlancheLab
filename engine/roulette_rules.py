@@ -48,6 +48,7 @@ class RouletteSessionState:
     neg_caroline_level: int = 0  # Negative Caroline (1-1-2-3-4 on losses)
     neg_snapback_level: int = 0  # Negatif 1-2-4-7 Snap-Back (on losses)
     gentle_surgeon_level: int = 0  # The Gentle Surgeon (1-2-4 on losses)
+    winners_guard_level: int = 0  # Winner's Guard (1-1-2-4 with profit stop)
     bet_in_progression: int = -1  # Which bet (0 or 1) is currently in progression (-1 = none)
     
     # Spice Engine v5.0
@@ -111,6 +112,16 @@ class RouletteStrategist:
         elif press_mode == 8:
             seq = [1, 2, 4]
             idx = min(state.gentle_surgeon_level, 2)
+            bet = base_val * seq[idx]
+        
+        # --- WINNER'S GUARD (1-1-2-4 with profit stop) ---
+        elif press_mode == 9:
+            seq = [1, 1, 2, 4]
+            # Cap at level 2 (4 units) if in profit
+            if state.session_pnl > 0:
+                idx = min(state.winners_guard_level, 2)  # Max level 2 when profitable
+            else:
+                idx = min(state.winners_guard_level, 3)  # Full sequence when not profitable
             bet = base_val * seq[idx]
 
         # --- CAPPED D'ALEMBERT ---
@@ -337,6 +348,17 @@ class RouletteStrategist:
                 if state.gentle_surgeon_level > 2: state.gentle_surgeon_level = 2
             elif won:
                 state.gentle_surgeon_level = 0
+        
+        elif state.overrides.press_trigger_wins == 9: # Winner's Guard
+            if lost:
+                state.winners_guard_level += 1
+                # Cap based on profit status
+                if state.session_pnl > 0:
+                    if state.winners_guard_level > 2: state.winners_guard_level = 2  # Stop at level 2 (4 units) when profitable
+                else:
+                    if state.winners_guard_level > 3: state.winners_guard_level = 3  # Full progression when not profitable
+            elif won:
+                state.winners_guard_level = 0
         
         elif state.overrides.press_trigger_wins == 4: # D'Alembert
             if won:

@@ -75,8 +75,8 @@ class RouletteWorker:
             b2 = BET_MAP.get(overrides.bet_strategy_2)
             active_main_bets.append(b2)
         
-        # For Negatif Snap-Back and The Gentle Surgeon: track individual bet results
-        use_snapback_halt = (session_overrides.press_trigger_wins in [7, 8] and len(active_main_bets) == 2)
+        # For Negatif Snap-Back, The Gentle Surgeon, and Winner's Guard: track individual bet results
+        use_snapback_halt = (session_overrides.press_trigger_wins in [7, 8, 9] and len(active_main_bets) == 2)
         
         while state.current_spin <= spins_limit and state.mode != 'STOPPED':
             decision = RouletteStrategist.get_next_decision(state)
@@ -136,6 +136,10 @@ class RouletteWorker:
                 elif prog_type == 8:  # The Gentle Surgeon
                     max_level = 2
                     level_attr = 'gentle_surgeon_level'
+                elif prog_type == 9:  # Winner's Guard
+                    # Dynamic max level based on profit
+                    max_level = 2 if state.session_pnl > 0 else 3
+                    level_attr = 'winners_guard_level'
                 
                 # Update progression state based on individual results
                 if state.bet_in_progression == -1:
