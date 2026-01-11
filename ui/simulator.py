@@ -655,6 +655,9 @@ def show_simulator():
             raw_bet = select_bet_strat.value
             if not raw_bet: raw_bet = 'BANKER'
             
+            # Fibonacci Hunter detection
+            fib_enabled = (int(select_press.value) == 11 or switch_fibonacci.value)
+            
             overrides = StrategyOverrides(
                 iron_gate_limit=int(slider_iron_gate.value), stop_loss_units=int(slider_stop_loss.value),
                 profit_lock_units=int(slider_profit.value), press_trigger_wins=int(select_press.value),
@@ -663,7 +666,7 @@ def show_simulator():
                 shoes_per_session=int(slider_shoes.value), penalty_box_enabled=switch_penalty.value,
                 ratchet_enabled=switch_ratchet.value, ratchet_mode=select_ratchet_mode.value,
                 # Fibonacci Hunter
-                fibonacci_hunter_enabled=switch_fibonacci.value,
+                fibonacci_hunter_enabled=fib_enabled,
                 fibonacci_hunter_base_unit=int(slider_fib_base.value),
                 fibonacci_hunter_action_on_max_win=select_fib_mode.value,
                 # Smart Trailing Stop
@@ -934,7 +937,7 @@ def show_simulator():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back", 8: "The Gentle Surgeon (1-2-4)", 9: "Winner's Guard (1-1-2-4)", 10: "Negatif Profit Guard (1-2-4)"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back", 8: "The Gentle Surgeon (1-2-4)", 9: "Winner's Guard (1-1-2-4)", 10: "Negatif Profit Guard (1-2-4)", 11: "🎯 Fibonacci Hunter [1-1-2-3-5-8]"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     
