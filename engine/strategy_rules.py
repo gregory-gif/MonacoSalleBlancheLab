@@ -24,6 +24,12 @@ class StrategyOverrides:
     ratchet_mode: str = 'Standard'
     ratchet_lock_pct: float = 0.5
     
+    # --- FIBONACCI HUNTER PROGRESSION ---
+    fibonacci_hunter_enabled: bool = False  # Enable Fibonacci Hunter (1-1-2-3-5-8)
+    fibonacci_hunter_base_unit: int = 100  # Base unit for Fibonacci sequence
+    fibonacci_hunter_max_step: int = 5  # Max step index (5 = 8 units, the "killer" bet)
+    fibonacci_hunter_action_on_max_win: str = 'STOP_SESSION'  # STOP_SESSION or RESET_AND_CONTINUE
+    
     # --- BET SELECTION ---
     bet_strategy: any = BetStrategy.BANKER 
     bet_strategy_2: str = None 

@@ -27,11 +27,20 @@ class BaccaratSessionState:
     tie_count: int = 0  # Total ties occurred
     tie_bets_placed: int = 0  # Tie bets actually placed
     tie_bets_pnl: float = 0.0  # P&L from tie bets only
+    
+    # Fibonacci Hunter Progression
+    fibonacci_hunter_step_index: int = 0  # Current step in sequence [1,1,2,3,5,8]
+    fibonacci_hunter_total_cycles: int = 0  # Number of completed sequences
+    fibonacci_hunter_max_reached: int = 0  # Times reached the killer bet
 
 class BaccaratStrategist:
     @staticmethod
     def get_next_decision(state: BaccaratSessionState):
         base_val = state.tier.base_unit
+        
+        # 0. CHECK IF SESSION ALREADY STOPPED (e.g., Fibonacci Hunter Target Hit)
+        if state.mode == PlayMode.STOPPED:
+            return {'mode': PlayMode.STOPPED, 'bet_amount': 0, 'reason': 'FIBONACCI TARGET HIT', 'bet_target': 'NONE'}
         
         # 1. VIRTUAL MODE CHECK (Iron Gate)
         if state.is_in_virtual_mode:
@@ -78,6 +87,18 @@ class BaccaratStrategist:
         bet = base_val
         pm = state.overrides.press_trigger_wins
         
+        # FIBONACCI HUNTER PROGRESSION (Priority over standard progressions)
+        if state.overrides.fibonacci_hunter_enabled:
+            fib_sequence = [1, 1, 2, 3, 5, 8]
+            fib_base = state.overrides.fibonacci_hunter_base_unit
+            fib_step = min(state.fibonacci_hunter_step_index, len(fib_sequence) - 1)
+            bet = fib_base * fib_sequence[fib_step]
+            
+            target = BetStrategy.PLAYER.name  # Fibonacci Hunter always bets PLAYER
+            reason = f'FIBONACCI_HUNTER Step {fib_step + 1}/{len(fib_sequence)} ({fib_sequence[fib_step]}u)'
+            return {'mode': PlayMode.PLAYING, 'bet_amount': bet, 'reason': reason, 'bet_target': target}
+        
+        # Standard progressions (if Fibonacci not enabled)
         if pm == 3: # Titan
             if state.current_press_streak == 1: bet = base_val * 1.5
             elif state.current_press_streak >= 2: bet = base_val * 2.5
@@ -119,6 +140,32 @@ class BaccaratStrategist:
         elif pnl_change > 0:
             state.consecutive_losses = 0
             state.current_press_streak += 1
+            
+            # FIBONACCI HUNTER: Progress on Win
+            if state.overrides.fibonacci_hunter_enabled:
+                fib_sequence = [1, 1, 2, 3, 5, 8]
+                max_step = state.overrides.fibonacci_hunter_max_step
+                
+                # Check if we just won the final "killer" bet
+                if state.fibonacci_hunter_step_index >= max_step:
+                    state.fibonacci_hunter_max_reached += 1
+                    state.fibonacci_hunter_total_cycles += 1
+                    
+                    # Check action on max win
+                    if state.overrides.fibonacci_hunter_action_on_max_win == 'STOP_SESSION':
+                        # Mark session to stop (will be checked in next get_next_decision)
+                        killer_units = fib_sequence[max_step]
+                        state.mode = PlayMode.STOPPED  # Force stop
+                    else:
+                        # RESET_AND_CONTINUE mode
+                        state.fibonacci_hunter_step_index = 0
+                else:
+                    # Move to next step
+                    state.fibonacci_hunter_step_index += 1
         else:
             state.consecutive_losses += 1
             state.current_press_streak = 0
+            
+            # FIBONACCI HUNTER: Hard Reset on Loss
+            if state.overrides.fibonacci_hunter_enabled:
+                state.fibonacci_hunter_step_index = 0  # Immediate reset to base bet
