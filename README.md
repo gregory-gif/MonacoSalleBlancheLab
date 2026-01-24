@@ -22,6 +22,7 @@ A Monte-Carlo engine capable of running hundreds of parallel "lives" (simulation
 
 * **Supports:** Baccarat & Roulette (European).
 * **Logic:** Tests Press Logic (Standard vs. Aggressive), Multipliers, and Betting Patterns (e.g., Red + Even).
+* **Bet Selection:** Choose BANKER, PLAYER, or FOLLOW_WINNER (adaptive strategy that follows winning bets).
 * **Stress Testing:** Accounts for Luxury Tax, Inflation, and Insolvency Thresholds.
 
 #### 2. Live Cockpit
@@ -74,5 +75,18 @@ python3 -m utils.main
 
 ```bash
 gunicorn -w 4 -k uvicorn.workers.UvicornWorker utils.main:app
-
 ```
+
+---
+
+### 📚 Strategy Guides
+
+The lab includes comprehensive documentation for various betting strategies:
+
+* **[FOLLOW_WINNER_GUIDE.md](FOLLOW_WINNER_GUIDE.md)** - Adaptive betting strategy that follows winning bets
+* **[FOLLOW_WINNER_QUICKSTART.md](FOLLOW_WINNER_QUICKSTART.md)** - Quick reference for FOLLOW_WINNER
+* **[FIBONACCI_HUNTER_GUIDE.md](FIBONACCI_HUNTER_GUIDE.md)** - Fibonacci progression strategy
+* **[GENTLE_SURGEON_GUIDE.md](GENTLE_SURGEON_GUIDE.md)** - Conservative recovery strategy
+* **[SPICE_SYSTEM_v5.0.md](SPICE_SYSTEM_v5.0.md)** - Complete system architecture
+
+For visual examples and demonstrations, see the `*_VISUAL_EXAMPLE.py` files.

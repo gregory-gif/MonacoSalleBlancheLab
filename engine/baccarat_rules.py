@@ -32,6 +32,9 @@ class BaccaratSessionState:
     fibonacci_hunter_step_index: int = 0  # Current step in sequence [1,1,2,3,5,8]
     fibonacci_hunter_total_cycles: int = 0  # Number of completed sequences
     fibonacci_hunter_max_reached: int = 0  # Times reached the killer bet
+    
+    # Follow Winner Logic
+    last_outcome: str = None  # Track last hand outcome (BANKER, PLAYER, or TIE)
 
 class BaccaratStrategist:
     @staticmethod
@@ -107,11 +110,33 @@ class BaccaratStrategist:
                 steps = min(state.current_press_streak, state.overrides.press_depth)
                 bet = base_val + (steps * state.tier.press_unit)
 
+        # Determine target based on bet strategy
         target = state.overrides.bet_strategy.name if hasattr(state.overrides.bet_strategy, 'name') else str(state.overrides.bet_strategy)
+        
+        # FOLLOW_WINNER logic: Follow last winner, but maintain bet during progressions
+        if state.overrides.bet_strategy == BetStrategy.FOLLOW_WINNER:
+            # If in a progression (consecutive_losses > 0 or current_press_streak > 0), maintain current bet
+            if state.consecutive_losses > 0 or state.current_press_streak > 0:
+                # Maintain the current bet - use last_outcome if available, otherwise default to BANKER
+                if state.last_outcome and state.last_outcome != 'TIE':
+                    target = state.last_outcome
+                else:
+                    target = 'BANKER'  # Default for first hand or after tie
+            else:
+                # Not in progression - follow the winner from last hand
+                if state.last_outcome and state.last_outcome != 'TIE':
+                    target = state.last_outcome
+                else:
+                    target = 'BANKER'  # Default for first hand or after tie
+        
         return {'mode': PlayMode.PLAYING, 'bet_amount': bet, 'reason': 'ACTION', 'bet_target': target}
 
     @staticmethod
-    def update_state_after_hand(state: BaccaratSessionState, won: bool, pnl_change: float, was_tie: bool = False):
+    def update_state_after_hand(state: BaccaratSessionState, won: bool, pnl_change: float, was_tie: bool = False, outcome: str = None):
+        # Track the last outcome for FOLLOW_WINNER strategy
+        if outcome:
+            state.last_outcome = outcome
+        
         if state.is_in_virtual_mode:
             if won:
                 state.is_in_virtual_mode = False

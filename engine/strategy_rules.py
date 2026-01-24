@@ -9,6 +9,7 @@ class PlayMode(Enum):
 class BetStrategy(Enum):
     BANKER = auto()
     PLAYER = auto()
+    FOLLOW_WINNER = auto()
 
 @dataclass
 class StrategyOverrides:

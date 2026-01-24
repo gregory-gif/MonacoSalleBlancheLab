@@ -57,7 +57,9 @@ class BaccaratWorker:
                 state.tie_bets_placed += 1
             
             # Simulation Physics - Realistic Baccarat Probabilities
-            is_banker = (overrides.bet_strategy == BetStrategy.BANKER)
+            # Determine actual bet target from decision (handles FOLLOW_WINNER)
+            bet_target = decision.get('bet_target', 'BANKER')
+            is_banker = (bet_target == 'BANKER')
             rng = random.random()
             
             # Probabilities: Banker 45.86%, Player 44.62%, Tie 9.52%
@@ -118,7 +120,7 @@ class BaccaratWorker:
             
             # Update state with outcome
             main_bet_won = (outcome == 'BANKER' and is_banker) or (outcome == 'PLAYER' and not is_banker)
-            BaccaratStrategist.update_state_after_hand(state, main_bet_won, pnl, is_tie)
+            BaccaratStrategist.update_state_after_hand(state, main_bet_won, pnl, is_tie, outcome)
             
             if state.hands_played_in_shoe >= 70:
                 state.current_shoe += 1
@@ -920,7 +922,7 @@ def show_simulator():
                 with ui.column():
                     ui.label('BACCARAT GAMEPLAY').classes('font-bold text-cyan-400')
                     
-                    select_bet_strat = ui.select(['BANKER', 'PLAYER'], value='BANKER', label='Bet Selection').classes('w-full')
+                    select_bet_strat = ui.select(['BANKER', 'PLAYER', 'FOLLOW_WINNER'], value='BANKER', label='Bet Selection').classes('w-full')
                     
                     slider_shoes = ui.slider(min=1, max=5, value=3).props('color=blue'); ui.label().bind_text_from(slider_shoes, 'value', lambda v: f'{v} Shoes (approx {v*70} hands)')
                     

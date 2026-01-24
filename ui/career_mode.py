@@ -429,7 +429,14 @@ class CareerManager:
         
         # 3. Handle Bet Strategy Object
         if game_type == 'Baccarat':
-            bet_strat_obj = BetStrategy.BANKER if bet_val == 'BANKER' else BetStrategy.PLAYER
+            if bet_val == 'BANKER':
+                bet_strat_obj = BetStrategy.BANKER
+            elif bet_val == 'PLAYER':
+                bet_strat_obj = BetStrategy.PLAYER
+            elif bet_val == 'FOLLOW_WINNER':
+                bet_strat_obj = BetStrategy.FOLLOW_WINNER
+            else:
+                bet_strat_obj = BetStrategy.BANKER  # Default fallback
         else:
             bet_strat_obj = bet_val 
 
