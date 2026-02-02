@@ -14,6 +14,7 @@ class RouletteBet(Enum):
     ODD = auto()
     LOW = auto()
     HIGH = auto()
+    COLUMN1 = auto()  # 1st column (1,4,7,...,34)
     # Complex Strategies
     STRAT_SALON_LITE = auto()   
     STRAT_FRENCH_LITE = auto()
@@ -28,7 +29,8 @@ WINNING_NUMBERS = {
     RouletteBet.EVEN: set(range(2, 37, 2)),
     RouletteBet.ODD: set(range(1, 37, 2)),
     RouletteBet.LOW: set(range(1, 19)),
-    RouletteBet.HIGH: set(range(19, 37))
+    RouletteBet.HIGH: set(range(19, 37)),
+    RouletteBet.COLUMN1: set(range(1, 37, 3))  # 1st column: 1,4,7,...,34
 }
 
 @dataclass
@@ -244,49 +246,44 @@ class RouletteStrategist:
         base_unit = state.tier.base_unit
         
         for bt in bet_types:
-            
             # --- SPICE: ZERO LEGER (3u) ---
             if bt == RouletteBet.SPICE_ZERO:
-                # Cost: 3 units (1 on 26, 1 on 0/3, 1 on 32/35)
-                # Payouts based on 1 unit stake per chip
                 cost = base_unit * 3.0
                 payout = 0.0
-                
                 if number == 26: payout = (base_unit * 35) + base_unit
                 elif number in [0, 3]: payout = (base_unit * 17) + base_unit
                 elif number in [32, 35]: payout = (base_unit * 17) + base_unit
-                
                 net_pnl += (payout - cost)
 
             # --- SPICE: TIERS DU CYLINDRE (6u) ---
             elif bt == RouletteBet.SPICE_TIERS:
-                # Cost: 6 units (6 splits)
                 cost = base_unit * 6.0
                 payout = 0.0
-                
                 tiers_nums = {5,8,10,11,13,16,23,24,27,30,33,36}
                 if number in tiers_nums:
-                    # All are splits (17:1)
                     payout = (base_unit * 17) + base_unit
-                
+                net_pnl += (payout - cost)
+
+            # --- COLUMN BETTING (2:1 payout) ---
+            elif bt == RouletteBet.COLUMN1:
+                cost = main_bet_amount
+                payout = 0.0
+                if number in WINNING_NUMBERS[RouletteBet.COLUMN1]:
+                    payout = main_bet_amount * 2
                 net_pnl += (payout - cost)
 
             # --- COMPLEX STRATEGY 1: SALON PRIVE LITE (Main Bet) ---
-            # Uses 'main_bet_amount' which might be scaled by progression
             elif bt == RouletteBet.STRAT_SALON_LITE:
-                bet_u = main_bet_amount # This acts as the "1 unit" for this pattern
+                bet_u = main_bet_amount
                 cost = bet_u * 5.0
                 payout = 0.0
-                
                 if number == 26: payout += (bet_u * 35) + bet_u
                 if number in [0, 3]: payout += (bet_u * 17) + bet_u
                 if number in [32, 35]: payout += (bet_u * 17) + bet_u
-                
                 if number in WINNING_NUMBERS[RouletteBet.BLACK]:
-                    payout += (bet_u * 2 * 2) 
+                    payout += (bet_u * 2 * 2)
                 elif number == 0:
-                    payout += (bet_u * 2 / 2) 
-                
+                    payout += (bet_u * 2 / 2)
                 net_pnl += (payout - cost)
 
             # --- COMPLEX STRATEGY 2: FRENCH MAIN GAME LITE (Main Bet) ---
@@ -294,10 +291,9 @@ class RouletteStrategist:
                 bet_u = main_bet_amount
                 cost = bet_u * 7.0
                 payout = 0.0
-                
                 tiers_nums = {5,8,10,11,13,16,23,24,27,30,33,36}
                 if number in tiers_nums:
-                    payout += (bet_u * 9.0) # (0.5u * 17) + 0.5u
+                    payout += (bet_u * 9.0)
                 
                 orph_nums = {1,6,9,14,17,20,31,34}
                 if number in orph_nums:
@@ -315,7 +311,7 @@ class RouletteStrategist:
             else:
                 pnl_change = 0
                 if number == 0:
-                    pnl_change = -(main_bet_amount / 2.0) 
+                    pnl_change = -(main_bet_amount / 2.0)
                 else:
                     winning_set = WINNING_NUMBERS[bt]
                     if number in winning_set:

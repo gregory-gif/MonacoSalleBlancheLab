@@ -26,6 +26,7 @@ BET_MAP = {
     'Odd': RouletteBet.ODD,
     '1-18': RouletteBet.LOW,
     '19-36': RouletteBet.HIGH,
+    'Column 1': RouletteBet.COLUMN1,
     'Strategy 1: Salon Privé Lite': RouletteBet.STRAT_SALON_LITE,
     'Strategy 2: French Main Game': RouletteBet.STRAT_FRENCH_LITE
 }
@@ -75,31 +76,29 @@ class RouletteWorker:
             b2 = BET_MAP.get(overrides.bet_strategy_2)
             active_main_bets.append(b2)
         
-        # For Negatif Snap-Back, The Gentle Surgeon, and profit guard variants: track individual bet results
-        use_snapback_halt = (session_overrides.press_trigger_wins in [7, 8, 9, 10] and len(active_main_bets) == 2)
+        # For Negatif Snap-Back and The Gentle Surgeon: track individual bet results
+        use_snapback_halt = (session_overrides.press_trigger_wins in [7, 8] and len(active_main_bets) == 2)
         
         while state.current_spin <= spins_limit and state.mode != 'STOPPED':
             decision = RouletteStrategist.get_next_decision(state)
-            if decision['mode'] == 'STOPPED': break
-            
+            if decision['mode'] == 'STOPPED':
+                break
+
             unit_amt = decision['bet']
             current_bets = active_main_bets.copy()
-            
+
             # === NEGATIF SNAP-BACK: HALT SECOND BET WHEN FIRST IS IN PROGRESSION ===
             if use_snapback_halt:
                 if state.bet_in_progression >= 0:
-                    # One bet is in progression, only bet on that one
                     current_bets = [active_main_bets[state.bet_in_progression]]
-            
+
             # === SPICE SYSTEM v5.0: EVALUATE AND FIRE ===
             spice_engine.reset_spin()
-            
-            # Calculate current state for spice evaluation
+
             session_pl_units = state.session_pnl / base_bet
             caroline_at_step4 = (state.caroline_level >= 4)
             stop_loss_eur = session_overrides.stop_loss_units * base_bet if session_overrides.stop_loss_units > 0 else 999999
-            
-            # Try to fire a spice
+
             fired_spice_type = spice_engine.evaluate_and_fire_spice(
                 session_pl_units=session_pl_units,
                 spin_index=state.current_spin,
@@ -108,86 +107,66 @@ class RouletteWorker:
                 current_bankroll=state.session_start_bankroll + state.session_pnl,
                 stop_loss=stop_loss_eur
             )
-            
-            # Track spice cost in volume (apply unit ratio for hybrid mode)
+
             if fired_spice_type:
                 pattern = SPICE_PATTERNS[spice_engine.spice_config[fired_spice_type].pattern_id]
                 spice_cost = pattern.unit_cost * base_bet * spice_engine.unit_ratio
                 volume += spice_cost
 
-            # Volume Calc for Main Bets
             total_main_units = 0
             for b in active_main_bets:
-                if b == RouletteBet.STRAT_SALON_LITE: total_main_units += 5
-                elif b == RouletteBet.STRAT_FRENCH_LITE: total_main_units += 7
-                else: total_main_units += 1
-            
+                if b == RouletteBet.STRAT_SALON_LITE:
+                    total_main_units += 5
+                elif b == RouletteBet.STRAT_FRENCH_LITE:
+                    total_main_units += 7
+                else:
+                    total_main_units += 1
+
             volume += (unit_amt * total_main_units)
-            
-            # Resolve main bets (with individual tracking for snap-back and gentle surgeon)
+
             if use_snapback_halt:
                 number, won_main, pnl_main, individual_results = RouletteStrategist.resolve_spin_with_individual_tracking(state, current_bets, unit_amt)
-                
-                # Determine which progression level to use
                 prog_type = session_overrides.press_trigger_wins
-                if prog_type == 7:  # Negatif Snap-Back
+                if prog_type == 7:
                     max_level = 3
                     level_attr = 'neg_snapback_level'
-                elif prog_type == 8:  # The Gentle Surgeon
+                elif prog_type == 8:
                     max_level = 2
                     level_attr = 'gentle_surgeon_level'
-                elif prog_type == 9:  # Winner's Guard
-                    # Dynamic max level based on profit
-                    max_level = 2 if state.session_pnl > 0 else 3
-                    level_attr = 'winners_guard_level'
-                elif prog_type == 10:  # Negatif Profit Guard
-                    # Dynamic max level based on profit
-                    max_level = 2 if state.session_pnl > 0 else 3
-                    level_attr = 'negatif_profit_guard_level'
-                
-                # Update progression state based on individual results
                 if state.bet_in_progression == -1:
-                    # No bet in progression yet - check if any bet lost
                     for idx, (bet_type, pnl, won) in enumerate(individual_results):
                         if not won:
-                            # Find which bet in active_main_bets this corresponds to
                             for j, active_bet in enumerate(active_main_bets):
                                 if active_bet == bet_type:
                                     state.bet_in_progression = j
-                                    setattr(state, level_attr, 1)  # Start progression at level 1
+                                    setattr(state, level_attr, 1)
                                     break
                             break
                 else:
-                    # A bet is in progression - check if it won or maxed out
                     if individual_results:
-                        bet_result = individual_results[0]  # Only one bet active
-                        if bet_result[2]:  # Won
+                        bet_result = individual_results[0]
+                        if bet_result[2]:
                             setattr(state, level_attr, 0)
-                            state.bet_in_progression = -1  # Resume both bets
+                            state.bet_in_progression = -1
                         else:
-                            # Lost - advance progression
                             current_level = getattr(state, level_attr)
                             current_level += 1
-                            if current_level > max_level:  # Failed at max level
+                            if current_level > max_level:
                                 setattr(state, level_attr, 0)
-                                state.bet_in_progression = -1  # Resume both bets
+                                state.bet_in_progression = -1
                             else:
                                 setattr(state, level_attr, current_level)
             else:
                 number, won_main, pnl_main = RouletteStrategist.resolve_spin(state, current_bets, unit_amt)
-            
-            # Resolve spice bet (if any)
+
             spice_pnl = 0
             spice_won = False
             if fired_spice_type:
                 spice_pnl, spice_won = spice_engine.resolve_spice(fired_spice_type, number, base_bet)
                 state.session_pnl += spice_pnl
-                
-                # MOMENTUM TP BOOST on spice win (updates state.dynamic_tp_eur only!)
                 if spice_won and state.dynamic_tp_eur > 0:
                     state.dynamic_tp_eur = spice_engine.apply_momentum_tp_boost(fired_spice_type, state.dynamic_tp_eur, base_bet)
-            
-            # Track spin-by-spin bankroll evolution
+
             if track_spins:
                 spin_log.append({
                     'spin': state.current_spin,
@@ -199,31 +178,26 @@ class RouletteWorker:
                     'caroline_level': state.caroline_level,
                     'dalembert_level': state.dalembert_level
                 })
-            
+
+            # === ENFORCE STOP LOSS IMMEDIATELY AFTER SPIN ===
+            if state.session_pnl <= -(session_overrides.stop_loss_units * base_bet):
+                state.mode = 'STOPPED'
+                exit_reason = 'STOP_LOSS'
+                break
+
             # === SMART TRAILING STOP LOGIC ===
             current_profit = state.session_pnl
-            
-            # Update peak profit
             if current_profit > session_peak_profit:
                 session_peak_profit = current_profit
-            
-            # Smart Exit Window Check (after smart_window_start spins)
-            if (session_overrides.smart_exit_enabled and 
-                state.current_spin >= session_overrides.smart_window_start):
-                
+            if (session_overrides.smart_exit_enabled and state.current_spin >= session_overrides.smart_window_start):
                 min_lock_threshold = session_overrides.min_profit_to_lock * base_bet
-                
-                # Only activate if we have meaningful profit
                 if current_profit >= min_lock_threshold:
-                    # Calculate dynamic floor (trailing stop trigger)
                     dynamic_floor = session_peak_profit * (1.0 - session_overrides.trailing_drop_pct)
-                    
-                    # Exit if profit has dropped below the trailing stop
                     if current_profit <= dynamic_floor:
                         state.mode = 'STOPPED'
                         exit_reason = 'SMART_TRAILING'
                         break
-            
+
             state.current_spin += 1
 
         # Get comprehensive spice statistics
@@ -1276,9 +1250,7 @@ def show_roulette_sim():
                     5: "La Caroline",
                     6: "Negative Caroline",
                     7: "Negatif 1-2-4-7 Snap-Back",
-                    8: "The Gentle Surgeon (1-2-4)",
-                    9: "Winner's Guard (1-1-2-4)",
-                    10: "Negatif Profit Guard (1-2-4)"
+                    8: "The Gentle Surgeon (1-2-4)"
                 }
                 press_name = press_map.get(overrides.press_trigger_wins, 'Unknown')
 
@@ -1568,13 +1540,13 @@ def show_roulette_sim():
                             ui.label('Zéro Léger (3u)').classes('font-bold text-cyan-300 mb-2')
                             switch_spice_zero = ui.switch('Enable').props('color=cyan')
                             with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_z_trig = ui.label()
-                            slider_spice_zero_trig = ui.slider(min=1, max=50, value=15, step=1).props('color=cyan'); lbl_z_trig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_zero_trig = ui.slider(min=5, max=50, value=15, step=1).props('color=cyan'); lbl_z_trig.bind_text_from(slider_spice_zero_trig, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_z_max = ui.label()
                             slider_spice_zero_max = ui.slider(min=0, max=10, value=2, step=1).props('color=cyan'); lbl_z_max.bind_text_from(slider_spice_zero_max, 'value', lambda v: f'{int(v)}/sess')
                             with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_z_cool = ui.label()
                             slider_spice_zero_cool = ui.slider(min=0, max=30, value=5, step=1).props('color=cyan'); lbl_z_cool.bind_text_from(slider_spice_zero_cool, 'value', lambda v: f'{int(v)} spins')
                             with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_z_min = ui.label()
-                            slider_spice_zero_min_pl = ui.slider(min=1, max=100, value=15, step=5).props('color=cyan'); lbl_z_min.bind_text_from(slider_spice_zero_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_zero_min_pl = ui.slider(min=0, max=100, value=15, step=5).props('color=cyan'); lbl_z_min.bind_text_from(slider_spice_zero_min_pl, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_z_max_pl = ui.label()
                             slider_spice_zero_max_pl = ui.slider(min=20, max=200, value=80, step=10).props('color=cyan'); lbl_z_max_pl.bind_text_from(slider_spice_zero_max_pl, 'value', lambda v: f'+{int(v)}u')
                         
@@ -1583,13 +1555,13 @@ def show_roulette_sim():
                             ui.label('Jeu Zéro (4u)').classes('font-bold text-cyan-300 mb-2')
                             switch_spice_jeu_zero = ui.switch('Enable').props('color=cyan')
                             with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_jz_trig = ui.label()
-                            slider_spice_jeu_zero_trig = ui.slider(min=1, max=50, value=15, step=1).props('color=cyan'); lbl_jz_trig.bind_text_from(slider_spice_jeu_zero_trig, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_jeu_zero_trig = ui.slider(min=5, max=50, value=15, step=1).props('color=cyan'); lbl_jz_trig.bind_text_from(slider_spice_jeu_zero_trig, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_jz_max = ui.label()
                             slider_spice_jeu_zero_max = ui.slider(min=0, max=10, value=2, step=1).props('color=cyan'); lbl_jz_max.bind_text_from(slider_spice_jeu_zero_max, 'value', lambda v: f'{int(v)}/sess')
                             with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_jz_cool = ui.label()
                             slider_spice_jeu_zero_cool = ui.slider(min=0, max=30, value=5, step=1).props('color=cyan'); lbl_jz_cool.bind_text_from(slider_spice_jeu_zero_cool, 'value', lambda v: f'{int(v)} spins')
                             with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_jz_min = ui.label()
-                            slider_spice_jeu_zero_min_pl = ui.slider(min=1, max=100, value=15, step=5).props('color=cyan'); lbl_jz_min.bind_text_from(slider_spice_jeu_zero_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_jeu_zero_min_pl = ui.slider(min=0, max=100, value=15, step=5).props('color=cyan'); lbl_jz_min.bind_text_from(slider_spice_jeu_zero_min_pl, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_jz_max_pl = ui.label()
                             slider_spice_jeu_zero_max_pl = ui.slider(min=20, max=200, value=80, step=10).props('color=cyan'); lbl_jz_max_pl.bind_text_from(slider_spice_jeu_zero_max_pl, 'value', lambda v: f'+{int(v)}u')
                         
@@ -1598,13 +1570,13 @@ def show_roulette_sim():
                             ui.label('Zéro Crown (4u)').classes('font-bold text-cyan-300 mb-2')
                             switch_spice_zero_crown = ui.switch('Enable').props('color=cyan')
                             with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_zc_trig = ui.label()
-                            slider_spice_zero_crown_trig = ui.slider(min=1, max=50, value=15, step=1).props('color=cyan'); lbl_zc_trig.bind_text_from(slider_spice_zero_crown_trig, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_zero_crown_trig = ui.slider(min=5, max=50, value=15, step=1).props('color=cyan'); lbl_zc_trig.bind_text_from(slider_spice_zero_crown_trig, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_zc_max = ui.label()
                             slider_spice_zero_crown_max = ui.slider(min=0, max=10, value=2, step=1).props('color=cyan'); lbl_zc_max.bind_text_from(slider_spice_zero_crown_max, 'value', lambda v: f'{int(v)}/sess')
                             with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_zc_cool = ui.label()
                             slider_spice_zero_crown_cool = ui.slider(min=0, max=30, value=5, step=1).props('color=cyan'); lbl_zc_cool.bind_text_from(slider_spice_zero_crown_cool, 'value', lambda v: f'{int(v)} spins')
                             with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_zc_min = ui.label()
-                            slider_spice_zero_crown_min_pl = ui.slider(min=1, max=100, value=15, step=5).props('color=cyan'); lbl_zc_min.bind_text_from(slider_spice_zero_crown_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_zero_crown_min_pl = ui.slider(min=0, max=100, value=15, step=5).props('color=cyan'); lbl_zc_min.bind_text_from(slider_spice_zero_crown_min_pl, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_zc_max_pl = ui.label()
                             slider_spice_zero_crown_max_pl = ui.slider(min=20, max=200, value=80, step=10).props('color=cyan'); lbl_zc_max_pl.bind_text_from(slider_spice_zero_crown_max_pl, 'value', lambda v: f'+{int(v)}u')
                 
@@ -1616,13 +1588,13 @@ def show_roulette_sim():
                             ui.label('Tiers du Cylindre (6u)').classes('font-bold text-purple-300 mb-2')
                             switch_spice_tiers = ui.switch('Enable').props('color=purple')
                             with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_t_trig = ui.label()
-                            slider_spice_tiers_trig = ui.slider(min=1, max=60, value=25, step=1).props('color=purple'); lbl_t_trig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_tiers_trig = ui.slider(min=10, max=60, value=25, step=1).props('color=purple'); lbl_t_trig.bind_text_from(slider_spice_tiers_trig, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_t_max = ui.label()
                             slider_spice_tiers_max = ui.slider(min=0, max=5, value=1, step=1).props('color=purple'); lbl_t_max.bind_text_from(slider_spice_tiers_max, 'value', lambda v: f'{int(v)}/sess')
                             with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_t_cool = ui.label()
                             slider_spice_tiers_cool = ui.slider(min=0, max=50, value=8, step=1).props('color=purple'); lbl_t_cool.bind_text_from(slider_spice_tiers_cool, 'value', lambda v: f'{int(v)} spins')
                             with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_t_min = ui.label()
-                            slider_spice_tiers_min_pl = ui.slider(min=1, max=100, value=25, step=5).props('color=purple'); lbl_t_min.bind_text_from(slider_spice_tiers_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_tiers_min_pl = ui.slider(min=10, max=100, value=25, step=5).props('color=purple'); lbl_t_min.bind_text_from(slider_spice_tiers_min_pl, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_t_max_pl = ui.label()
                             slider_spice_tiers_max_pl = ui.slider(min=30, max=200, value=80, step=10).props('color=purple'); lbl_t_max_pl.bind_text_from(slider_spice_tiers_max_pl, 'value', lambda v: f'+{int(v)}u')
                         
@@ -1631,13 +1603,13 @@ def show_roulette_sim():
                             ui.label('Orphelins (5u)').classes('font-bold text-purple-300 mb-2')
                             switch_spice_orphelins = ui.switch('Enable').props('color=purple')
                             with ui.row().classes('w-full justify-between mt-2'): ui.label('Trigger').classes('text-xs text-slate-400'); lbl_o_trig = ui.label()
-                            slider_spice_orphelins_trig = ui.slider(min=1, max=60, value=25, step=1).props('color=purple'); lbl_o_trig.bind_text_from(slider_spice_orphelins_trig, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_orphelins_trig = ui.slider(min=10, max=60, value=25, step=1).props('color=purple'); lbl_o_trig.bind_text_from(slider_spice_orphelins_trig, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max Uses').classes('text-xs text-slate-400'); lbl_o_max = ui.label()
                             slider_spice_orphelins_max = ui.slider(min=0, max=5, value=1, step=1).props('color=purple'); lbl_o_max.bind_text_from(slider_spice_orphelins_max, 'value', lambda v: f'{int(v)}/sess')
                             with ui.row().classes('w-full justify-between'): ui.label('Cooldown').classes('text-xs text-slate-400'); lbl_o_cool = ui.label()
                             slider_spice_orphelins_cool = ui.slider(min=0, max=50, value=8, step=1).props('color=purple'); lbl_o_cool.bind_text_from(slider_spice_orphelins_cool, 'value', lambda v: f'{int(v)} spins')
                             with ui.row().classes('w-full justify-between'): ui.label('Min P/L').classes('text-xs text-slate-400'); lbl_o_min = ui.label()
-                            slider_spice_orphelins_min_pl = ui.slider(min=1, max=100, value=25, step=5).props('color=purple'); lbl_o_min.bind_text_from(slider_spice_orphelins_min_pl, 'value', lambda v: f'+{int(v)}u')
+                            slider_spice_orphelins_min_pl = ui.slider(min=10, max=100, value=25, step=5).props('color=purple'); lbl_o_min.bind_text_from(slider_spice_orphelins_min_pl, 'value', lambda v: f'+{int(v)}u')
                             with ui.row().classes('w-full justify-between'): ui.label('Max P/L').classes('text-xs text-slate-400'); lbl_o_max_pl = ui.label()
                             slider_spice_orphelins_max_pl = ui.slider(min=30, max=200, value=80, step=10).props('color=purple'); lbl_o_max_pl.bind_text_from(slider_spice_orphelins_max_pl, 'value', lambda v: f'+{int(v)}u')
                 
@@ -1731,13 +1703,13 @@ def show_roulette_sim():
                     
                     # Smart Trailing Stop Controls
                     ui.separator().classes('bg-slate-700 my-2')
-                    ui.label('🎯 SMART TRAILING STOP (5+ spins)').classes('text-xs text-yellow-400 font-bold')
+                    ui.label('🎯 SMART TRAILING STOP (45+ spins)').classes('text-xs text-yellow-400 font-bold')
                     switch_smart_exit = ui.switch('Enable Smart Exit Window').props('color=yellow')
                     switch_smart_exit.value = True
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Start Window').classes('text-xs text-slate-400')
                         lbl_smart_window = ui.label()
-                    slider_smart_window = ui.slider(min=5, max=120, value=90, step=5).props('color=yellow')
+                    slider_smart_window = ui.slider(min=45, max=120, value=90, step=5).props('color=yellow')
                     lbl_smart_window.bind_text_from(slider_smart_window, 'value', lambda v: f'Spin {int(v)}')
                     with ui.row().classes('w-full justify-between items-center'): 
                         ui.label('Min Profit to Lock').classes('text-xs text-slate-400')
@@ -1754,7 +1726,7 @@ def show_roulette_sim():
                     with ui.row().classes('items-center justify-between'): switch_ratchet = ui.switch('Ratchet').props('color=gold'); select_ratchet_mode = ui.select(['Sprint', 'Standard', 'Deep Stack', 'Gold Grinder'], value='Standard').props('dense options-dense').classes('w-32')
                     ui.separator().classes('bg-slate-700 my-2')
                     
-                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back", 8: "The Gentle Surgeon (1-2-4)", 9: "Winner's Guard (1-1-2-4)", 10: "Negatif Profit Guard (1-2-4)"}, value=1, label='Press Logic').classes('w-full')
+                    select_press = ui.select({0: 'Flat', 1: 'Press 1-Win', 2: 'Press 2-Wins', 3: 'Progression 100-150-250', 4: "Capped D'Alembert (Strategist)", 5: "La Caroline (1-1-2-3-4)", 6: "Negative Caroline (1-1-2-3-4)", 7: "Negatif 1-2-4-7 Snap-Back", 8: "The Gentle Surgeon (1-2-4)"}, value=1, label='Press Logic').classes('w-full')
                     ui.label('Press Depth (Wins to Reset)').classes('text-xs text-red-300')
                     slider_press_depth = ui.slider(min=0, max=5, value=3).props('color=red'); ui.label().bind_text_from(slider_press_depth, 'value', lambda v: f'{v} Wins')
                     ui.separator().classes('bg-slate-700 my-2')
